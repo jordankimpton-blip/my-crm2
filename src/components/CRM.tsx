@@ -376,66 +376,6 @@ ${actions.filter(a=>!a.done).map(a=>`- ${a.text}${a.due_date?` (due ${a.due_date
     </div>
   );
 
-  // ── CONTACTS LIST ──
-  return (
-    <div style={S.page}>
-      <div style={S.topBar}>
-        <p style={S.title}>My network <span style={{ fontWeight:400, fontSize:14, color:"#6b7280" }}>{contacts.length > 0 ? `· ${contacts.length}` : ""}</span></p>
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-          <NavBtn id="actions" label="Actions" badge={alertActions.length} />
-          <NavBtn id="ask"     label="Ask AI ✦" badge={0} />
-          <button style={S.btnPrimary} onClick={() => setView("add")}>+ Add</button>
-        </div>
-      </div>
-      {alertActions.length > 0 && (
-        <div onClick={() => setView("actions")} style={S.alert}>
-          <span style={{ fontSize:15 }}>⚠</span>
-          <span style={{ fontSize:13, color:"#633806" }}>{alertActions.length} action item{alertActions.length>1?"s":""} need your attention</span>
-          <span style={{ marginLeft:"auto", fontSize:12, color:"#854F0B" }}>View →</span>
-        </div>
-      )}
-      {contacts.length > 0 && (
-        <div style={{ marginTop:24, paddingTop:16, borderTop:"0.5px solid #e5e7eb", display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          <button style={S.btn} onClick={handleExport}>Export backup</button>
-          <label style={{ ...S.btn, cursor:"pointer" }}>Import backup<input type="file" accept=".json" onChange={handleImport} style={{ display:"none" }} /></label>
-          <span style={{ fontSize:11, color:"#9ca3af", marginLeft:4 }}>Save a backup after each session</span>
-        </div>
-      )}
-      {contacts.length > 0 && <input style={{ ...S.input, marginBottom:16, marginTop:12 }} value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, company, or notes…" />}
-      {contacts.length === 0 ? (
-        <div style={{ textAlign:"center", padding:"3rem 1rem", color:"#6b7280" }}>
-          <p style={{ fontSize:14 }}>No contacts yet.</p>
-          <button style={S.btnPrimary} onClick={() => setView("add")}>Add your first contact</button>
-        </div>
-      ) : filtered.length === 0 ? (
-        <p style={{ fontSize:13, color:"#6b7280" }}>No contacts match your search.</p>
-      ) : (
-        filtered.map(c => {
-          const cActions = actions.filter(a => a.contact_id === c.id && !a.done);
-          const urgent   = cActions.filter(a => a.due_date && (daysUntil(a.due_date) ?? 99) <= 1);
-          return (
-            <div key={c.id} style={S.card}
-              onClick={() => { setSelected(c); setDetailTab("notes"); setView("detail"); }}
-              onMouseEnter={e => (e.currentTarget.style.borderColor="#9ca3af")}
-              onMouseLeave={e => (e.currentTarget.style.borderColor="#e5e7eb")}
-            >
-              <Avatar name={c.name} size={40} />
-              <div style={{ flex:1, minWidth:0 }}>
-                <p style={{ margin:0, fontSize:14, fontWeight:500, color:"#111" }}>{c.name}</p>
-                {(c.role||c.company) && <p style={{ margin:0, fontSize:12, color:"#6b7280", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{[c.role,c.company].filter(Boolean).join(" · ")}</p>}
-              </div>
-              <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
-                {urgent.length > 0 && <span style={{ background:"#FCEBEB", color:"#A32D2D", fontSize:10, fontWeight:500, padding:"2px 7px", borderRadius:10 }}>{urgent.length} due</span>}
-                {cActions.length > 0 && urgent.length === 0 && <span style={{ background:"#f3f4f6", color:"#6b7280", fontSize:10, padding:"2px 7px", borderRadius:10 }}>{cActions.length} open</span>}
-                {c.date && <span style={{ fontSize:11, color:"#9ca3af" }}>{c.date}</span>}
-              </div>
-            </div>
-          );
-        })
-      )}
-    </div>
-  );
-
   // ── ADD CONTACT ──
   if (view === "add") return (
     <div style={S.page}>
@@ -546,5 +486,65 @@ ${actions.filter(a=>!a.done).map(a=>`- ${a.text}${a.due_date?` (due ${a.due_date
       </div>
     );
   }
-}
 
+  // ── CONTACTS LIST ──
+  return (
+    <div style={S.page}>
+      <div style={S.topBar}>
+        <p style={S.title}>My network <span style={{ fontWeight:400, fontSize:14, color:"#6b7280" }}>{contacts.length > 0 ? `· ${contacts.length}` : ""}</span></p>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          <NavBtn id="actions" label="Actions" badge={alertActions.length} />
+          <NavBtn id="ask"     label="Ask AI ✦" badge={0} />
+          <button style={S.btnPrimary} onClick={() => setView("add")}>+ Add</button>
+        </div>
+      </div>
+      {alertActions.length > 0 && (
+        <div onClick={() => setView("actions")} style={S.alert}>
+          <span style={{ fontSize:15 }}>⚠</span>
+          <span style={{ fontSize:13, color:"#633806" }}>{alertActions.length} action item{alertActions.length>1?"s":""} need your attention</span>
+          <span style={{ marginLeft:"auto", fontSize:12, color:"#854F0B" }}>View →</span>
+        </div>
+      )}
+      {contacts.length > 0 && (
+        <div style={{ marginTop:24, paddingTop:16, borderTop:"0.5px solid #e5e7eb", display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+          <button style={S.btn} onClick={handleExport}>Export backup</button>
+          <label style={{ ...S.btn, cursor:"pointer" }}>Import backup<input type="file" accept=".json" onChange={handleImport} style={{ display:"none" }} /></label>
+          <span style={{ fontSize:11, color:"#9ca3af", marginLeft:4 }}>Save a backup after each session</span>
+        </div>
+      )}
+      {contacts.length > 0 && <input style={{ ...S.input, marginBottom:16, marginTop:12 }} value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, company, or notes…" />}
+      {contacts.length === 0 ? (
+        <div style={{ textAlign:"center", padding:"3rem 1rem", color:"#6b7280" }}>
+          <p style={{ fontSize:14 }}>No contacts yet.</p>
+          <button style={S.btnPrimary} onClick={() => setView("add")}>Add your first contact</button>
+        </div>
+      ) : filtered.length === 0 ? (
+        <p style={{ fontSize:13, color:"#6b7280" }}>No contacts match your search.</p>
+      ) : (
+        filtered.map(c => {
+          const cActions = actions.filter(a => a.contact_id === c.id && !a.done);
+          const urgent   = cActions.filter(a => a.due_date && (daysUntil(a.due_date) ?? 99) <= 1);
+          return (
+            <div key={c.id} style={S.card}
+              onClick={() => { setSelected(c); setDetailTab("notes"); setView("detail"); }}
+              onMouseEnter={e => (e.currentTarget.style.borderColor="#9ca3af")}
+              onMouseLeave={e => (e.currentTarget.style.borderColor="#e5e7eb")}
+            >
+              <Avatar name={c.name} size={40} />
+              <div style={{ flex:1, minWidth:0 }}>
+                <p style={{ margin:0, fontSize:14, fontWeight:500, color:"#111" }}>{c.name}</p>
+                {(c.role||c.company) && <p style={{ margin:0, fontSize:12, color:"#6b7280", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{[c.role,c.company].filter(Boolean).join(" · ")}</p>}
+              </div>
+              <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
+                {urgent.length > 0 && <span style={{ background:"#FCEBEB", color:"#A32D2D", fontSize:10, fontWeight:500, padding:"2px 7px", borderRadius:10 }}>{urgent.length} due</span>}
+                {cActions.length > 0 && urgent.length === 0 && <span style={{ background:"#f3f4f6", color:"#6b7280", fontSize:10, padding:"2px 7px", borderRadius:10 }}>{cActions.length} open</span>}
+                {c.date && <span style={{ fontSize:11, color:"#9ca3af" }}>{c.date}</span>}
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+
+}
