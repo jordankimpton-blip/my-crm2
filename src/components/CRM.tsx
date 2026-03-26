@@ -7,11 +7,11 @@ import { supabase } from "@/lib/supabase";
 interface Contact {
   id: number;
   name: string;
-  company?: string;
-  role?: string;
-  linkedin?: string;
-  notes?: string;
-  date?: string;
+  company?: string | null;
+  role?: string | null;
+  linkedin?: string | null;
+  notes?: string | null;
+  date?: string | null;
   created_at: string;
 }
 
@@ -123,7 +123,8 @@ export default function CRM() {
 
   // ── CRUD helpers ──
   async function addContact(data: Omit<Contact, "id" | "created_at">) {
-    const { data: row } = await supabase.from("contacts").insert(data).select().single();
+    const { data: row, error } = await supabase.from("contacts").insert(data).select().single();
+    if (error) throw new Error(error.message);
     if (row) setContacts(prev => [row, ...prev]);
     return row as Contact | null;
   }
@@ -156,11 +157,15 @@ export default function CRM() {
 
   async function handleAddContact() {
     if (!form.name.trim()) { setFormError("Name is required."); return; }
-    const contact = await addContact({ name:form.name.trim(), company:form.company, role:form.role, linkedin:form.linkedin, notes:form.notes, date:form.date });
-    if (contact && form.actionText.trim()) {
-      await addAction({ text:form.actionText.trim(), contact_id:contact.id, due_date:form.actionDueDate||null, done:false });
+    try {
+      const contact = await addContact({ name:form.name.trim(), company:form.company||null, role:form.role||null, linkedin:form.linkedin||null, notes:form.notes||null, date:form.date||null });
+      if (contact && form.actionText.trim()) {
+        await addAction({ text:form.actionText.trim(), contact_id:contact.id, due_date:form.actionDueDate||null, done:false });
+      }
+      setForm(blankForm()); setFormError(""); setView("list");
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : "Failed to save contact. Please try again.");
     }
-    setForm(blankForm()); setFormError(""); setView("list");
   }
 
   async function handleDeleteContact(id: number) {
