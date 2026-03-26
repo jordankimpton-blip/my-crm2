@@ -232,7 +232,7 @@ ${contacts.length === 0 ? "None." : contacts.map(c=>`- ${c.name}${c.company?`, $
 OPEN ACTION ITEMS (${actions.filter(a=>!a.done).length}):
 ${actions.filter(a=>!a.done).map(a=>`- ${a.text}${a.due_date?` (due ${a.due_date})`:""}${a.contact_id?` [re: ${contacts.find(c=>c.id===a.contact_id)?.name||"unknown"}]`:""}`).join("\n")||"None."}`;
     try {
-      const res  = await fetch("https://api.anthropic.com/v1/messages", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, system:sys, messages:updated }) });
+      const res  = await fetch("/api/ask", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ system:sys, messages:updated }) });
       const data = await res.json();
       setAiMessages([...updated, { role:"assistant", content:data.content?.find((b: {type:string;text?:string}) => b.type==="text")?.text||"Sorry, no response." }]);
     } catch {
