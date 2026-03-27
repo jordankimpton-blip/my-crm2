@@ -4,7 +4,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Personal CRM",
+  title: "Jordans CRM",
   description: "Keep track of your network",
 };
 
