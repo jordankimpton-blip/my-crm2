@@ -567,7 +567,7 @@ function draw() {
   ctx.fillRect(0, 0, GW, GH);
 
   drawClouds();
-  if (state !== 'start') drawPollGrid();
+  if (state !== 'start') drawPollAxis();
   drawPipes();
   drawLeaders();
   drawPeters();
@@ -853,6 +853,50 @@ function drawPlayer() {
   ctx.fill();
   ctx.restore();
 
+  // ── Horizontal tracker line (connects Luxon to the poll axis) ──
+  if (state === 'playing') {
+    const AXIS_X = 36;
+    const pctColour = pollPct >= 40 ? '#00DD55' : pollPct >= 28 ? '#FFD700' : '#FF4444';
+    ctx.save();
+    ctx.strokeStyle = pctColour;
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(AXIS_X, displayY);
+    ctx.lineTo(player.x - PLAYER_R - 4, displayY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Dot on the axis where the line meets
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(AXIS_X, displayY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = pctColour;
+    ctx.fill();
+    ctx.restore();
+
+    // ── Floating % badge to the right of head ──────────────────
+    ctx.save();
+    const badgeText = pollPct + '%';
+    const badgeX = player.x + PLAYER_R + 6;
+    const badgeW = ctx.measureText(badgeText).width + 14;
+    // Background pill
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    rRect(badgeX, displayY - 12, badgeW, 24, 7);
+    ctx.fill();
+    ctx.strokeStyle = pctColour;
+    ctx.lineWidth = 1.5;
+    rRect(badgeX, displayY - 12, badgeW, 24, 7);
+    ctx.stroke();
+    // Text
+    ctx.fillStyle = pctColour;
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(badgeText, badgeX + badgeW / 2, displayY);
+    ctx.restore();
+  }
+
   drawFace('luxon', player.x, displayY, PLAYER_R, displayRotation);
 
   // PM badge
@@ -910,63 +954,99 @@ function drawParticles() {
   }
 }
 
-// ── Poll grid (faint horizontal % lines) ─────────────────────
-function drawPollGrid() {
+// ── Poll axis — left Y-axis + background zones + gridlines ────
+function drawPollAxis() {
   const playableH = GH - GROUND_H;
+  const AXIS_X    = 36; // left axis x position
+
+  // Key Y positions
+  const yAt = pct => playableH * (1 - (pct - 5) / 55);
+  const dangerY   = yAt(28);
+  const majorityY = yAt(40);
+
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 6]);
-  ctx.font = '9px Arial';
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  ctx.textBaseline = 'middle';
 
-  // Draw lines at 10%, 20%, 30%, 40%, 50%, 60%
-  for (let pct = 10; pct <= 60; pct += 10) {
-    const frac = (pct - 5) / 55;
-    const lineY = playableH * (1 - frac);
-    ctx.beginPath();
-    ctx.moveTo(0, lineY);
-    ctx.lineTo(GW, lineY);
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
+  // ── Background colour zones ──────────────────────────────────
+  // Red danger band (below 28%)
+  ctx.fillStyle = 'rgba(200, 0, 0, 0.10)';
+  ctx.fillRect(AXIS_X, dangerY, GW - AXIS_X, playableH - dangerY);
 
-  // Danger zone line at 28% (coalition territory threshold)
-  const dangerFrac = (28 - 5) / 55;
-  const dangerY = playableH * (1 - dangerFrac);
-  ctx.strokeStyle = 'rgba(255, 80, 0, 0.3)';
+  // Yellow safe band (28–40%)
+  ctx.fillStyle = 'rgba(255, 210, 0, 0.07)';
+  ctx.fillRect(AXIS_X, majorityY, GW - AXIS_X, dangerY - majorityY);
+
+  // Green majority band (above 40%)
+  ctx.fillStyle = 'rgba(0, 200, 80, 0.09)';
+  ctx.fillRect(AXIS_X, 0, GW - AXIS_X, majorityY);
+
+  // ── Left axis bar ────────────────────────────────────────────
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
   ctx.lineWidth = 1.5;
-  ctx.setLineDash([8, 4]);
   ctx.beginPath();
-  ctx.moveTo(0, dangerY);
-  ctx.lineTo(GW, dangerY);
+  ctx.moveTo(AXIS_X, 0);
+  ctx.lineTo(AXIS_X, playableH);
   ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = 'rgba(255,100,0,0.5)';
-  ctx.font = '8px Arial';
-  ctx.textAlign = 'right';
-  ctx.fillText('COALITION RISK', GW - 4, dangerY - 5);
+
+  // ── Gridlines + tick marks + labels ─────────────────────────
+  for (let pct = 10; pct <= 60; pct += 10) {
+    const ly = yAt(pct);
+    const isKey = pct === 30 || pct === 40 || pct === 50;
+    const colour = pct >= 40 ? '#66FF99' : pct >= 28 ? '#FFE566' : '#FF9999';
+
+    // Gridline
+    ctx.strokeStyle = isKey ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.09)';
+    ctx.lineWidth = isKey ? 1.5 : 1;
+    ctx.setLineDash(isKey ? [6, 5] : [3, 7]);
+    ctx.beginPath();
+    ctx.moveTo(AXIS_X, ly);
+    ctx.lineTo(GW, ly);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Tick
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(AXIS_X - 6, ly);
+    ctx.lineTo(AXIS_X, ly);
+    ctx.stroke();
+
+    // Label
+    ctx.fillStyle = colour;
+    ctx.font = isKey ? 'bold 9px Arial' : '8px Arial';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pct + '%', AXIS_X - 8, ly);
+  }
+
+  // ── Zone boundary labels ─────────────────────────────────────
+  // "MAJORITY" threshold
+  ctx.fillStyle = 'rgba(80,255,140,0.85)';
+  ctx.font = 'bold 7px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText('▶ MAJORITY', AXIS_X + 4, majorityY - 6);
+
+  // "COALITION RISK" threshold
+  ctx.fillStyle = 'rgba(255,100,80,0.85)';
+  ctx.fillText('▶ COALITION RISK', AXIS_X + 4, dangerY + 7);
+
+  // ── Axis title (rotated) ─────────────────────────────────────
+  ctx.save();
+  ctx.translate(9, playableH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.font = 'bold 8px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('NATIONAL POLL %', 0, 0);
+  ctx.restore();
 
   ctx.restore();
 }
 
-// ── Poll display (top only, no side bar) ──────────────────────
+// ── Poll display (top bar — day + term) ───────────────────────
 function drawPollGauge() {
   ctx.save();
-
-  // Big poll number (top-centre)
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.font = 'bold 38px Arial';
-  ctx.fillText(pollPct + '%', GW / 2 + 2, 52);
-  ctx.fillStyle = pollPct >= 40 ? '#00DD55' : pollPct >= 28 ? '#FFD700' : '#FF4444';
-  ctx.fillText(pollPct + '%', GW / 2, 50);
-
-  // "NATIONAL POLLING" label
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.font = 'bold 9px Arial';
-  ctx.fillText('NATIONAL POLLING', GW / 2, 66);
 
   // Days leading (top-left)
   ctx.textAlign = 'left';
