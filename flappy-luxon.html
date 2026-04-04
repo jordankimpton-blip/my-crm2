@@ -468,10 +468,8 @@ function draw() {
   drawLeaders();
   drawGround();
 
-  if (state !== 'start') {
-    drawParticles();
-    drawPlayer();
-  }
+  drawParticles();
+  drawPlayer();
 
   drawTaxFlashes();
 
@@ -657,6 +655,12 @@ function drawGround() {
 
 // ── Player ────────────────────────────────────────────────────
 function drawPlayer() {
+  // On start screen, bob gently in place
+  const displayY = state === 'start'
+    ? GH / 2 + Math.sin(Date.now() / 600) * 10
+    : player.y;
+  const displayRotation = state === 'start' ? 0 : player.rotation;
+
   // Shadow
   ctx.save();
   ctx.globalAlpha = 0.18;
@@ -666,11 +670,11 @@ function drawPlayer() {
   ctx.fill();
   ctx.restore();
 
-  drawFace('luxon', player.x, player.y, PLAYER_R, player.rotation);
+  drawFace('luxon', player.x, displayY, PLAYER_R, displayRotation);
 
   // PM badge
   ctx.save();
-  ctx.translate(player.x + PLAYER_R - 7, player.y - PLAYER_R + 7);
+  ctx.translate(player.x + PLAYER_R - 7, displayY - PLAYER_R + 7);
   ctx.beginPath();
   ctx.arc(0, 0, 10, 0, Math.PI * 2);
   ctx.fillStyle = '#003DA5';
@@ -764,70 +768,15 @@ function drawPollGrid() {
   ctx.restore();
 }
 
-// ── Poll gauge (right side) ───────────────────────────────────
+// ── Poll display (top only, no side bar) ──────────────────────
 function drawPollGauge() {
-  const gaugeX   = GW - 38;
-  const gaugeTop = 12;
-  const gaugeBot = GH - GROUND_H - 12;
-  const gaugeH   = gaugeBot - gaugeTop;
-  const gaugeW   = 22;
-
   ctx.save();
-
-  // Background track
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  rRect(gaugeX, gaugeTop, gaugeW, gaugeH, 6);
-  ctx.fill();
-
-  // Fill — colour shifts green→yellow→red based on poll pct
-  const fillFrac = (pollPct - 5) / 55;
-  const fillH    = gaugeH * fillFrac;
-  const fillY    = gaugeBot - fillH;
-
-  // Gradient: red at bottom, yellow mid, green at top
-  const fillGrad = ctx.createLinearGradient(0, gaugeBot, 0, gaugeTop);
-  fillGrad.addColorStop(0,    '#CC0000');
-  fillGrad.addColorStop(0.35, '#FF8800');
-  fillGrad.addColorStop(0.65, '#FFD700');
-  fillGrad.addColorStop(1,    '#00BB44');
-
-  ctx.save();
-  rRect(gaugeX, gaugeTop, gaugeW, gaugeH, 6);
-  ctx.clip();
-  ctx.fillStyle = fillGrad;
-  ctx.fillRect(gaugeX, fillY, gaugeW, fillH);
-  ctx.restore();
-
-  // Border
-  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-  ctx.lineWidth = 1.5;
-  rRect(gaugeX, gaugeTop, gaugeW, gaugeH, 6);
-  ctx.stroke();
-
-  // Marker needle
-  ctx.fillStyle = 'white';
-  ctx.beginPath();
-  ctx.moveTo(gaugeX - 6, fillY);
-  ctx.lineTo(gaugeX,     fillY - 4);
-  ctx.lineTo(gaugeX,     fillY + 4);
-  ctx.closePath();
-  ctx.fill();
-
-  // % labels at top/mid/bottom
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  ctx.font = '8px Arial';
-  ctx.textAlign = 'center';
-  ctx.fillText('60%', gaugeX + gaugeW / 2, gaugeTop + 8);
-  ctx.fillText('30%', gaugeX + gaugeW / 2, gaugeTop + gaugeH / 2);
-  ctx.fillText('5%',  gaugeX + gaugeW / 2, gaugeBot - 4);
 
   // Big poll number (top-centre)
   ctx.textAlign = 'center';
-  // Shadow
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
   ctx.font = 'bold 38px Arial';
   ctx.fillText(pollPct + '%', GW / 2 + 2, 52);
-  // Colour by poll health
   ctx.fillStyle = pollPct >= 40 ? '#00DD55' : pollPct >= 28 ? '#FFD700' : '#FF4444';
   ctx.fillText(pollPct + '%', GW / 2, 50);
 
