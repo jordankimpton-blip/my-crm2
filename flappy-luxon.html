@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Flappy Luxon</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a1a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
+    }
+    #gameCanvas {
+      display: block;
+      image-rendering: pixelated;
+      touch-action: none;
+    }
+    #loading {
+      position: absolute;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 18px;
+      text-align: center;
+    }
+    #loading .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(255,255,255,0.2);
+      border-top-color: #FFD700;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 12px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div id="loading">
+  <div class="spinner"></div>
+  Loading politicians...
+</div>
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// ============================================================
+//  FLAPPY LUXON — NZ Political Satire
+//  Tap to fly, avoid red tape, stay out of the coalition zone
+// ============================================================
+
+const canvas = document.getElementById('gameCanvas');
+const ctx    = canvas.getContext('2d');
+const loading = document.getElementById('loading');
+
+// ── Game dimensions (logical pixels) ─────────────────────────
+const GW = 390;
+const GH = 700;
+
+function resize() {
+  const r = Math.min(window.innerWidth / GW, window.innerHeight / GH);
+  canvas.style.width  = Math.floor(GW * r) + 'px';
+  canvas.style.height = Math.floor(GH * r) + 'px';
+  canvas.width  = GW;
+  canvas.height = GH;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Constants ─────────────────────────────────────────────────
+const GROUND_H    = 85;
+const PLAYER_R    = 30;
+const PLAYER_X    = 85;
+const GRAVITY     = 0.34;
+const JUMP_VEL    = -7.8;
+const PIPE_W      = 58;
+const PIPE_GAP    = 155;
+const PIPE_SPEED  = 2.4;
+const PIPE_EVERY  = 95;   // frames between pipes
+const LEADER_EVERY_MIN = 260;
+const LEADER_EVERY_MAX = 450;
+
+// ── Politician config ─────────────────────────────────────────
+const POLS = {
+  luxon: {
+    wiki:    'Christopher_Luxon',
+    name:    'Luxon',
+    party:   'National',
+    color:   '#003DA5',
+    faceTop: 0.05,   // crop start (0=top of image)
+    faceH:   0.55,   // crop height as fraction of image height
+  },
+  hipkins: {
+    wiki:    'Chris_Hipkins',
+    name:    'Hipkins',
+    party:   'Labour',
+    color:   '#CC0000',
+    faceTop: 0.05,
+    faceH:   0.55,
+  },
+  swarbrick: {
+    wiki:    'Chloë_Swarbrick',
+    name:    'Swarbrick',
+    party:   'Greens',
+    color:   '#00843D',
+    faceTop: 0.05,
+    faceH:   0.55,
+  },
+  waititi: {
+    wiki:    'Rawiri_Waititi',
+    name:    'Waititi',
+    party:   'Te Pāti Māori',
+    color:   '#8B0000',
+    faceTop: 0.05,
+    faceH:   0.55,
+  },
+};
+
+const imgs = {};   // key → HTMLImageElement or null
+
+// ── Fetch Wikipedia thumbnail, load image ─────────────────────
+async function loadPoliticianImage(key) {
+  const pol = POLS[key];
+  try {
+    const res  = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pol.wiki)}`
+    );
+    const data = await res.json();
+    const src  = data.thumbnail?.source;
+    if (!src) { imgs[key] = null; return; }
+
+    await new Promise(resolve => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload  = () => { imgs[key] = img; resolve(); };
+      img.onerror = () => { imgs[key] = null;  resolve(); };
+      img.src = src;
+    });
+  } catch (_) {
+    imgs[key] = null;
+  }
+}
+
+// ── Draw circular face (or coloured fallback) ─────────────────
+function drawFace(key, cx, cy, r, rotation = 0) {
+  const pol = POLS[key];
+  const img = imgs[key];
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (rotation) ctx.rotate(rotation);
+
+  // Clip to circle
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.closePath();
+
+  if (img) {
+    ctx.clip();
+    // Crop: horizontal centre, upper portion
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+    const srcY  = ih * pol.faceTop;
+    const srcH  = ih * pol.faceH;
+    const srcX  = 0;
+    const srcW  = iw;
+    // Scale so the cropped strip fills the circle diameter
+    const scale = (r * 2) / Math.min(srcW, srcH);
+    const dw = srcW * scale;
+    const dh = srcH * scale;
+    ctx.drawImage(img, srcX, srcY, srcW, srcH, -dw / 2, -r, dw, dh);
+  } else {
+    // Fallback: solid colour + initial
+    ctx.fillStyle = pol.color;
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = `bold ${Math.round(r * 0.9)}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pol.name[0], 0, 1);
+  }
+
+  ctx.restore();
+
+  // White ring border
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+}
+
+// ── Audio ─────────────────────────────────────────────────────
+let audioCtx;
+function ac() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function beep(freq, dur, type = 'sine', vol = 0.12) {
+  try {
+    const a = ac(), o = a.createOscillator(), g = a.createGain();
+    o.connect(g); g.connect(a.destination);
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + dur);
+    o.start(); o.stop(a.currentTime + dur);
+  } catch (_) {}
+}
+function playScore() { beep(880, 0.08, 'sine', 0.1); }
+function playJump()  { beep(520, 0.06, 'square', 0.07); }
+function playDeath() {
+  [280, 240, 200, 160].forEach((f, i) =>
+    setTimeout(() => beep(f, 0.12, 'sawtooth', 0.15), i * 80)
+  );
+}
+
+// ── Game state ────────────────────────────────────────────────
+let state     = 'start';  // 'start' | 'playing' | 'dead'
+let score     = 0;
+let highScore = 0;
+let frame     = 0;
+
+let player = { x: PLAYER_X, y: GH / 2, vy: 0, rotation: 0 };
+let pipes  = [];
+let leaders = [];
+let taxFlashes = [];
+let particles  = [];
+let clouds = [
+  { x: 60,  y: 70,  w: 90,  spd: 0.25 },
+  { x: 240, y: 130, w: 65,  spd: 0.18 },
+  { x: 330, y: 55,  w: 50,  spd: 0.32 },
+];
+
+let nextPipe   = 100;
+let nextLeader = 300;
+
+// ── Reset ─────────────────────────────────────────────────────
+function reset() {
+  player   = { x: PLAYER_X, y: GH / 2, vy: 0, rotation: 0 };
+  pipes    = [];
+  leaders  = [];
+  taxFlashes = [];
+  particles  = [];
+  frame    = 0;
+  score    = 0;
+  nextPipe   = 100;
+  nextLeader = 300;
+}
+
+// ── Input ─────────────────────────────────────────────────────
+function tap() {
+  if (state === 'start') {
+    state = 'playing';
+    player.vy = JUMP_VEL;
+    playJump();
+    return;
+  }
+  if (state === 'dead') {
+    reset();
+    state = 'start';
+    return;
+  }
+  // Playing
+  player.vy = JUMP_VEL;
+  playJump();
+
+  // Tax cut flash — pick a fun variant
+  const variants = [
+    'TAX CUT! 💰',
+    'TRICKLE DOWN! 📉',
+    'TAX CUT! 🏦',
+    'LESS TAX! 💸',
+    'CUT RED TAPE! ✂️',
+  ];
+  taxFlashes.push({
+    text:  variants[Math.floor(Math.random() * variants.length)],
+    x:     GW / 2,
+    y:     GH * 0.28 + (Math.random() * 80 - 40),
+    alpha: 1,
+    scale: 0.4,
+    vy:    -0.6,
+  });
+
+  // Little burst particles
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI * 2 * i) / 6;
+    particles.push({
+      x: player.x, y: player.y,
+      vx: Math.cos(angle) * (1.5 + Math.random()),
+      vy: Math.sin(angle) * (1.5 + Math.random()),
+      life: 1, color: ['#FFD700','#003DA5','#FFFFFF'][i % 3],
+    });
+  }
+}
+
+canvas.addEventListener('touchstart', e => { e.preventDefault(); tap(); }, { passive: false });
+canvas.addEventListener('mousedown',  e => { e.preventDefault(); tap(); });
+document.addEventListener('keydown',  e => { if (e.code === 'Space' || e.code === 'ArrowUp') tap(); });
+
+// ── Collision helpers ─────────────────────────────────────────
+function circRect(cx, cy, cr, rx, ry, rw, rh) {
+  const nearX = Math.max(rx, Math.min(cx, rx + rw));
+  const nearY = Math.max(ry, Math.min(cy, ry + rh));
+  return Math.hypot(cx - nearX, cy - nearY) < cr;
+}
+
+// ── Update ────────────────────────────────────────────────────
+function update() {
+  if (state !== 'playing') return;
+  frame++;
+
+  // ── Player ──
+  player.vy += GRAVITY;
+  player.y  += player.vy;
+  player.rotation = Math.max(-0.45, Math.min(0.9, player.vy * 0.075));
+
+  // Ceiling bounce
+  if (player.y - PLAYER_R < 0) { player.y = PLAYER_R; player.vy = 1; }
+
+  // Ground = death
+  if (player.y + PLAYER_R >= GH - GROUND_H) { die(); return; }
+
+  // ── Pipes ──
+  if (frame >= nextPipe) {
+    const minY = 110;
+    const maxY = GH - GROUND_H - PIPE_GAP - 80;
+    const gapY = minY + Math.random() * (maxY - minY);
+    pipes.push({ x: GW + PIPE_W, gapY, scored: false });
+    nextPipe = frame + PIPE_EVERY;
+  }
+
+  for (let i = pipes.length - 1; i >= 0; i--) {
+    const p = pipes[i];
+    p.x -= PIPE_SPEED;
+
+    if (!p.scored && p.x + PIPE_W < player.x) {
+      p.scored = true;
+      score++;
+      playScore();
+    }
+
+    // Collision: top pipe
+    if (circRect(player.x, player.y, PLAYER_R - 3,
+                 p.x, 0, PIPE_W, p.gapY)) { die(); return; }
+    // Collision: bottom pipe
+    if (circRect(player.x, player.y, PLAYER_R - 3,
+                 p.x, p.gapY + PIPE_GAP, PIPE_W, GH)) { die(); return; }
+
+    if (p.x + PIPE_W < 0) pipes.splice(i, 1);
+  }
+
+  // ── Opposition leaders ──
+  if (frame >= nextLeader) {
+    const types = ['hipkins', 'swarbrick', 'waititi'];
+    const type  = types[Math.floor(Math.random() * types.length)];
+    const y     = 90 + Math.random() * (GH - GROUND_H - 220);
+    leaders.push({
+      type, x: GW + 50, y,
+      spd:    2.2 + Math.random() * 1.4,
+      wobble: Math.random() * Math.PI * 2,
+    });
+    nextLeader = frame + LEADER_EVERY_MIN +
+                 Math.floor(Math.random() * (LEADER_EVERY_MAX - LEADER_EVERY_MIN));
+  }
+
+  for (let i = leaders.length - 1; i >= 0; i--) {
+    const l = leaders[i];
+    l.x      -= l.spd;
+    l.wobble += 0.045;
+    l.y      += Math.sin(l.wobble) * 0.9;
+
+    if (Math.hypot(player.x - l.x, player.y - l.y) < PLAYER_R + 28) {
+      die(); return;
+    }
+    if (l.x + 50 < 0) leaders.splice(i, 1);
+  }
+
+  // ── Tax cut flashes ──
+  for (let i = taxFlashes.length - 1; i >= 0; i--) {
+    const t = taxFlashes[i];
+    t.alpha -= 0.022;
+    t.scale  = Math.min(1.4, t.scale + 0.075);
+    t.y     += t.vy;
+    if (t.alpha <= 0) taxFlashes.splice(i, 1);
+  }
+
+  // ── Particles ──
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.12;
+    p.life -= 0.045;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // ── Clouds ──
+  for (const c of clouds) {
+    c.x -= c.spd;
+    if (c.x + c.w < 0) c.x = GW + c.w;
+  }
+}
+
+function die() {
+  state = 'dead';
+  if (score > highScore) highScore = score;
+  playDeath();
+}
+
+// ── Draw helpers ──────────────────────────────────────────────
+function rRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+// ── Draw ──────────────────────────────────────────────────────
+function draw() {
+  // Sky
+  const sky = ctx.createLinearGradient(0, 0, 0, GH);
+  sky.addColorStop(0, '#5BBCE8');
+  sky.addColorStop(1, '#A8DEFF');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, GW, GH);
+
+  drawClouds();
+  drawPipes();
+  drawLeaders();
+  drawGround();
+
+  if (state !== 'start') {
+    drawParticles();
+    drawPlayer();
+  }
+
+  drawTaxFlashes();
+
+  if (state === 'playing' || state === 'dead') drawHUD();
+  if (state === 'start') drawStart();
+  if (state === 'dead')  drawGameOver();
+}
+
+// ── Clouds ────────────────────────────────────────────────────
+function drawClouds() {
+  ctx.fillStyle = 'rgba(255,255,255,0.72)';
+  for (const c of clouds) {
+    const cx = c.x, cy = c.y, w = c.w, h = w * 0.45;
+    rRect(cx, cy, w, h, h / 2); ctx.fill();
+    rRect(cx + w * 0.1, cy - h * 0.4, w * 0.75, h * 0.9, h * 0.45); ctx.fill();
+    rRect(cx + w * 0.35, cy - h * 0.6, w * 0.5, h * 0.9, h * 0.45); ctx.fill();
+  }
+}
+
+// ── Pipes (bureaucratic red tape) ─────────────────────────────
+function drawPipes() {
+  for (const p of pipes) {
+    // Top pipe
+    drawBureauPipe(p.x, 0, PIPE_W, p.gapY, 'top');
+    // Bottom pipe
+    drawBureauPipe(p.x, p.gapY + PIPE_GAP, PIPE_W, GH - GROUND_H - (p.gapY + PIPE_GAP), 'bot');
+  }
+}
+
+function drawBureauPipe(x, y, w, h, end) {
+  if (h <= 0) return;
+
+  // Body
+  const bodyGrad = ctx.createLinearGradient(x, 0, x + w, 0);
+  bodyGrad.addColorStop(0,   '#2c2c2c');
+  bodyGrad.addColorStop(0.4, '#454545');
+  bodyGrad.addColorStop(1,   '#1a1a1a');
+  ctx.fillStyle = bodyGrad;
+  ctx.fillRect(x, y, w, h);
+
+  // Red tape diagonal stripes
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(200, 0, 0, 0.55)';
+  ctx.lineWidth = 7;
+  for (let s = -h; s < w + h; s += 18) {
+    ctx.beginPath();
+    ctx.moveTo(x + s, y);
+    ctx.lineTo(x + s + h, y + h);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Cap
+  const capH = 22;
+  const capGrad = ctx.createLinearGradient(x - 6, 0, x + w + 6, 0);
+  capGrad.addColorStop(0,   '#383838');
+  capGrad.addColorStop(0.5, '#5a5a5a');
+  capGrad.addColorStop(1,   '#303030');
+  ctx.fillStyle = capGrad;
+  if (end === 'top') {
+    ctx.fillRect(x - 6, y + h - capH, w + 12, capH);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(x - 6, y + h - capH, w + 12, 3);
+  } else {
+    ctx.fillRect(x - 6, y, w + 12, capH);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(x - 6, y + capH - 3, w + 12, 3);
+  }
+
+  // "BUREAUCRACY" label (rotated, centred)
+  if (h > 55) {
+    ctx.save();
+    ctx.translate(x + w / 2, y + h / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = 'rgba(255, 220, 80, 0.75)';
+    ctx.font = 'bold 9px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('BUREAUCRACY', 0, 0);
+    ctx.restore();
+  }
+}
+
+// ── Opposition leaders ────────────────────────────────────────
+function drawLeaders() {
+  for (const l of leaders) {
+    const pol = POLS[l.type];
+
+    // Glow / aura
+    const glow = ctx.createRadialGradient(l.x, l.y, 10, l.x, l.y, 50);
+    glow.addColorStop(0, pol.color + '55');
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(l.x, l.y, 50, 0, Math.PI * 2);
+    ctx.fill();
+
+    drawFace(l.type, l.x, l.y, 32);
+
+    // Name pill
+    const tw = ctx.measureText(pol.name).width + 16;
+    ctx.fillStyle = pol.color;
+    rRect(l.x - tw / 2, l.y + 35, tw, 18, 9);
+    ctx.fill();
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 10px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(pol.name, l.x, l.y + 48);
+
+    // Party tag
+    ctx.fillStyle = 'rgba(255,255,255,0.65)';
+    ctx.font = '8px Arial';
+    ctx.fillText(pol.party, l.x, l.y + 62);
+  }
+}
+
+// ── Ground (coalition zone) ───────────────────────────────────
+function drawGround() {
+  const gy = GH - GROUND_H;
+  const half = GW / 2;
+
+  // ACT — yellow/gold
+  const actGrad = ctx.createLinearGradient(0, gy, 0, GH);
+  actGrad.addColorStop(0, '#F5C400');
+  actGrad.addColorStop(1, '#C9A000');
+  ctx.fillStyle = actGrad;
+  ctx.fillRect(0, gy, half, GROUND_H);
+
+  // NZ First — black/charcoal
+  const nzfGrad = ctx.createLinearGradient(half, gy, half, GH);
+  nzfGrad.addColorStop(0, '#222222');
+  nzfGrad.addColorStop(1, '#111111');
+  ctx.fillStyle = nzfGrad;
+  ctx.fillRect(half, gy, half, GROUND_H);
+
+  // Top border
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, gy, GW, 4);
+
+  // Divider
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 4]);
+  ctx.beginPath();
+  ctx.moveTo(half, gy);
+  ctx.lineTo(half, GH);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // ACT text
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = 'bold 18px Arial';
+  ctx.fillText('ACT', half / 2, gy + 26);
+  ctx.font = '10px Arial';
+  ctx.fillStyle = '#333';
+  ctx.fillText('David Seymour', half / 2, gy + 42);
+  ctx.font = '9px Arial';
+  ctx.fillStyle = '#555';
+  ctx.fillText('✂️  Cut. Everything.', half / 2, gy + 58);
+  ctx.font = '8px Arial';
+  ctx.fillStyle = '#777';
+  ctx.fillText('Regulatory Standards Bill ∞', half / 2, gy + 72);
+
+  // NZ First text
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 14px Arial';
+  ctx.fillText('NZ FIRST', half + (GW - half) / 2, gy + 24);
+  ctx.font = '10px Arial';
+  ctx.fillStyle = '#aaa';
+  ctx.fillText('Winston Peters', half + (GW - half) / 2, gy + 40);
+  ctx.font = '9px Arial';
+  ctx.fillStyle = '#888';
+  ctx.fillText('🎩  Back Again (seriously)', half + (GW - half) / 2, gy + 55);
+  ctx.font = '8px Arial';
+  ctx.fillStyle = '#666';
+  ctx.fillText('Est. 1993, 1996, 2008…', half + (GW - half) / 2, gy + 70);
+}
+
+// ── Player ────────────────────────────────────────────────────
+function drawPlayer() {
+  // Shadow
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.beginPath();
+  ctx.ellipse(player.x, GH - GROUND_H - 4, PLAYER_R * 0.8, 5, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#000';
+  ctx.fill();
+  ctx.restore();
+
+  drawFace('luxon', player.x, player.y, PLAYER_R, player.rotation);
+
+  // PM badge
+  ctx.save();
+  ctx.translate(player.x + PLAYER_R - 7, player.y - PLAYER_R + 7);
+  ctx.beginPath();
+  ctx.arc(0, 0, 10, 0, Math.PI * 2);
+  ctx.fillStyle = '#003DA5';
+  ctx.fill();
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 7px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('PM', 0, 0.5);
+  ctx.restore();
+}
+
+// ── Tax cut flashes ───────────────────────────────────────────
+function drawTaxFlashes() {
+  for (const t of taxFlashes) {
+    ctx.save();
+    ctx.globalAlpha = t.alpha;
+    ctx.translate(t.x, t.y);
+    ctx.scale(t.scale, t.scale);
+
+    // Drop shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.font = 'bold 34px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(t.text, 3, 3);
+
+    // Alternating gold/white
+    const hue = Math.sin(Date.now() / 120);
+    ctx.fillStyle = hue > 0 ? '#FFD700' : '#FFFFFF';
+    ctx.fillText(t.text, 0, 0);
+
+    ctx.restore();
+  }
+}
+
+// ── Particles ─────────────────────────────────────────────────
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.life * 0.8;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3 * p.life, 0, Math.PI * 2);
+    ctx.fillStyle = p.color;
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ── HUD ───────────────────────────────────────────────────────
+function drawHUD() {
+  ctx.save();
+  // Score shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.font = 'bold 40px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(score, GW / 2 + 2, 57);
+  // Score
+  ctx.fillStyle = 'white';
+  ctx.fillText(score, GW / 2, 55);
+  ctx.restore();
+}
+
+// ── Start screen ──────────────────────────────────────────────
+function drawStart() {
+  // Panel
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 35, 105, 0.88)';
+  rRect(GW / 2 - 158, GH / 2 - 220, 316, 420, 22);
+  ctx.fill();
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 2;
+  rRect(GW / 2 - 158, GH / 2 - 220, 316, 420, 22);
+  ctx.stroke();
+  ctx.restore();
+
+  // Title
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 52px Arial';
+  ctx.fillText('FLAPPY', GW / 2, GH / 2 - 148);
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 48px Arial';
+  ctx.fillText('LUXON', GW / 2, GH / 2 - 100);
+
+  // Face
+  drawFace('luxon', GW / 2, GH / 2 - 28, 48);
+
+  // Tagline
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 13px Arial';
+  ctx.fillText('Navigate the bureaucracy!', GW / 2, GH / 2 + 44);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.78)';
+  ctx.font = '11.5px Arial';
+  ctx.fillText('Dodge Labour • Greens • Te Pāti Māori', GW / 2, GH / 2 + 63);
+  ctx.fillText("Don't land in the coalition zone!", GW / 2, GH / 2 + 80);
+
+  // Blinking tap prompt
+  const pulse = 0.65 + 0.35 * Math.sin(Date.now() / 380);
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 20px Arial';
+  ctx.fillText('TAP TO START', GW / 2, GH / 2 + 128);
+  ctx.globalAlpha = 1;
+
+  if (highScore > 0) {
+    ctx.fillStyle = '#FFD700';
+    ctx.font = '13px Arial';
+    ctx.fillText(`🏆 Best: ${highScore}`, GW / 2, GH / 2 + 160);
+  }
+}
+
+// ── Game over ─────────────────────────────────────────────────
+function drawGameOver() {
+  // Dim
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillRect(0, 0, GW, GH);
+
+  // Panel
+  ctx.save();
+  const panelGrad = ctx.createLinearGradient(GW / 2 - 158, 0, GW / 2 + 158, 0);
+  panelGrad.addColorStop(0, '#A80000');
+  panelGrad.addColorStop(0.5, '#CC0000');
+  panelGrad.addColorStop(1, '#A80000');
+  ctx.fillStyle = panelGrad;
+  rRect(GW / 2 - 158, GH / 2 - 228, 316, 440, 22);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1.5;
+  rRect(GW / 2 - 158, GH / 2 - 228, 316, 440, 22);
+  ctx.stroke();
+  ctx.restore();
+
+  // Headline
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 26px Arial';
+  ctx.fillText('NATIONAL DROPPED', GW / 2, GH / 2 - 177);
+  ctx.font = 'bold 24px Arial';
+  ctx.fillText('IN THE POLLS', GW / 2, GH / 2 - 148);
+
+  // Subhead
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'italic 15px Georgia';
+  ctx.fillText('Tax cuts: Ineffective', GW / 2, GH / 2 - 120);
+
+  // Divider
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(GW / 2 - 120, GH / 2 - 104);
+  ctx.lineTo(GW / 2 + 120, GH / 2 - 104);
+  ctx.stroke();
+
+  // Score box
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  rRect(GW / 2 - 108, GH / 2 - 96, 216, 80, 12);
+  ctx.fill();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = '13px Arial';
+  ctx.fillText('PIPES OF RED TAPE SURVIVED', GW / 2, GH / 2 - 73);
+
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 46px Arial';
+  ctx.fillText(score, GW / 2, GH / 2 - 28);
+
+  // High score line
+  if (score >= highScore && score > 0) {
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 13px Arial';
+    ctx.fillText('🏆 NEW RECORD!', GW / 2, GH / 2 + 10);
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '12px Arial';
+    ctx.fillText(`Best: ${highScore}`, GW / 2, GH / 2 + 10);
+  }
+
+  // Quote
+  ctx.fillStyle = 'rgba(255,255,255,0.82)';
+  ctx.font = 'italic 11.5px Georgia';
+  ctx.fillText('"He navigated the bureaucracy…', GW / 2, GH / 2 + 50);
+  ctx.fillText('straight into coalition talks."', GW / 2, GH / 2 + 65);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '10px Georgia';
+  ctx.fillText('— NZ Herald, probably', GW / 2, GH / 2 + 82);
+
+  // Tap to retry
+  const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 380);
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 19px Arial';
+  ctx.fillText('TAP TO TRY AGAIN', GW / 2, GH / 2 + 128);
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = 'rgba(255,255,255,0.38)';
+  ctx.font = '10px Arial';
+  ctx.fillText('(The economy cannot be fixed in one term)', GW / 2, GH / 2 + 150);
+}
+
+// ── Game loop ─────────────────────────────────────────────────
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── Boot ──────────────────────────────────────────────────────
+(async () => {
+  await Promise.all(Object.keys(POLS).map(loadPoliticianImage));
+  loading.style.display = 'none';
+  loop();
+})();
+</script>
+</body>
+</html>
