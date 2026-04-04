@@ -79,7 +79,7 @@ const PLAYER_X    = 85;
 const GRAVITY     = 0.34;
 const JUMP_VEL    = -7.8;
 const PIPE_W      = 58;
-const PIPE_GAP    = 180;
+const PIPE_GAP    = 210;
 const PIPE_SPEED  = 2.1;
 const PIPE_EVERY  = 95;   // frames between pipes
 const LEADER_EVERY_MIN = 260;
@@ -227,9 +227,18 @@ function playDeath() {
 
 // ── Game state ────────────────────────────────────────────────
 let state     = 'start';  // 'start' | 'playing' | 'dead'
-let score     = 0;
+let score     = 0;  // days leading
 let highScore = 0;
 let frame     = 0;
+
+// Poll percentage derived from player Y each frame
+let pollPct = 38;
+
+function getPollPct() {
+  const playableH = GH - GROUND_H - PLAYER_R * 2;
+  const frac = 1 - Math.max(0, Math.min(1, (player.y - PLAYER_R) / playableH));
+  return Math.round(frac * 55 + 5); // 5% (bottom) → 60% (top)
+}
 
 let player = { x: PLAYER_X, y: GH / 2, vy: 0, rotation: 0 };
 let pipes  = [];
@@ -320,6 +329,12 @@ function update() {
   if (state !== 'playing') return;
   frame++;
 
+  // Update poll percentage
+  pollPct = getPollPct();
+
+  // Score = days leading (increment every ~2 seconds of survival)
+  if (frame % 120 === 0) score++;
+
   // ── Player ──
   player.vy += GRAVITY;
   player.y  += player.vy;
@@ -336,7 +351,14 @@ function update() {
     const minY = 110;
     const maxY = GH - GROUND_H - PIPE_GAP - 80;
     const gapY = minY + Math.random() * (maxY - minY);
-    pipes.push({ x: GW + PIPE_W, gapY, scored: false });
+    const scandals = [
+      'CONSENT SCANDAL','COST OF LIVING','MEDIA CRITICISM',
+      'POLL DROP','HOUSING CRISIS','BENEFIT CUTS','SCHOOL LUNCH',
+      'HEALTH CUTS','MĀORI POLICY','WATER QUALITY','CRIME STATS',
+      'BROKEN PROMISE','INFLATION','INTEREST RATES','PRIVATISATION',
+    ];
+    const label = scandals[Math.floor(Math.random() * scandals.length)];
+    pipes.push({ x: GW + PIPE_W, gapY, scored: false, label });
     nextPipe = frame + PIPE_EVERY;
   }
 
@@ -346,7 +368,6 @@ function update() {
 
     if (!p.scored && p.x + PIPE_W < player.x) {
       p.scored = true;
-      score++;
       playScore();
     }
 
@@ -442,6 +463,7 @@ function draw() {
   ctx.fillRect(0, 0, GW, GH);
 
   drawClouds();
+  if (state !== 'start') drawPollGrid();
   drawPipes();
   drawLeaders();
   drawGround();
@@ -454,6 +476,7 @@ function draw() {
   drawTaxFlashes();
 
   if (state === 'playing' || state === 'dead') drawHUD();
+  if (state === 'playing' || state === 'dead') drawPollGauge();
   if (state === 'start') drawStart();
   if (state === 'dead')  drawGameOver();
 }
@@ -473,13 +496,13 @@ function drawClouds() {
 function drawPipes() {
   for (const p of pipes) {
     // Top pipe
-    drawBureauPipe(p.x, 0, PIPE_W, p.gapY, 'top');
+    drawBureauPipe(p.x, 0, PIPE_W, p.gapY, 'top', p.label);
     // Bottom pipe
-    drawBureauPipe(p.x, p.gapY + PIPE_GAP, PIPE_W, GH - GROUND_H - (p.gapY + PIPE_GAP), 'bot');
+    drawBureauPipe(p.x, p.gapY + PIPE_GAP, PIPE_W, GH - GROUND_H - (p.gapY + PIPE_GAP), 'bot', p.label);
   }
 }
 
-function drawBureauPipe(x, y, w, h, end) {
+function drawBureauPipe(x, y, w, h, end, label) {
   if (h <= 0) return;
 
   // Body
@@ -522,16 +545,16 @@ function drawBureauPipe(x, y, w, h, end) {
     ctx.fillRect(x - 6, y + capH - 3, w + 12, 3);
   }
 
-  // "BUREAUCRACY" label (rotated, centred)
-  if (h > 55) {
+  // Scandal label (rotated, centred)
+  if (h > 55 && label) {
     ctx.save();
     ctx.translate(x + w / 2, y + h / 2);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillStyle = 'rgba(255, 220, 80, 0.75)';
-    ctx.font = 'bold 9px Arial';
+    ctx.fillStyle = 'rgba(255, 80, 80, 0.9)';
+    ctx.font = 'bold 8px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('BUREAUCRACY', 0, 0);
+    ctx.fillText(label, 0, 0);
     ctx.restore();
   }
 }
@@ -700,18 +723,133 @@ function drawParticles() {
   }
 }
 
+// ── Poll grid (faint horizontal % lines) ─────────────────────
+function drawPollGrid() {
+  const playableH = GH - GROUND_H;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 6]);
+  ctx.font = '9px Arial';
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.textBaseline = 'middle';
+
+  // Draw lines at 10%, 20%, 30%, 40%, 50%, 60%
+  for (let pct = 10; pct <= 60; pct += 10) {
+    const frac = (pct - 5) / 55;
+    const lineY = playableH * (1 - frac);
+    ctx.beginPath();
+    ctx.moveTo(0, lineY);
+    ctx.lineTo(GW, lineY);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Danger zone line at 28% (coalition territory threshold)
+  const dangerFrac = (28 - 5) / 55;
+  const dangerY = playableH * (1 - dangerFrac);
+  ctx.strokeStyle = 'rgba(255, 80, 0, 0.3)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([8, 4]);
+  ctx.beginPath();
+  ctx.moveTo(0, dangerY);
+  ctx.lineTo(GW, dangerY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255,100,0,0.5)';
+  ctx.font = '8px Arial';
+  ctx.textAlign = 'right';
+  ctx.fillText('COALITION RISK', GW - 4, dangerY - 5);
+
+  ctx.restore();
+}
+
+// ── Poll gauge (right side) ───────────────────────────────────
+function drawPollGauge() {
+  const gaugeX   = GW - 38;
+  const gaugeTop = 12;
+  const gaugeBot = GH - GROUND_H - 12;
+  const gaugeH   = gaugeBot - gaugeTop;
+  const gaugeW   = 22;
+
+  ctx.save();
+
+  // Background track
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  rRect(gaugeX, gaugeTop, gaugeW, gaugeH, 6);
+  ctx.fill();
+
+  // Fill — colour shifts green→yellow→red based on poll pct
+  const fillFrac = (pollPct - 5) / 55;
+  const fillH    = gaugeH * fillFrac;
+  const fillY    = gaugeBot - fillH;
+
+  // Gradient: red at bottom, yellow mid, green at top
+  const fillGrad = ctx.createLinearGradient(0, gaugeBot, 0, gaugeTop);
+  fillGrad.addColorStop(0,    '#CC0000');
+  fillGrad.addColorStop(0.35, '#FF8800');
+  fillGrad.addColorStop(0.65, '#FFD700');
+  fillGrad.addColorStop(1,    '#00BB44');
+
+  ctx.save();
+  rRect(gaugeX, gaugeTop, gaugeW, gaugeH, 6);
+  ctx.clip();
+  ctx.fillStyle = fillGrad;
+  ctx.fillRect(gaugeX, fillY, gaugeW, fillH);
+  ctx.restore();
+
+  // Border
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth = 1.5;
+  rRect(gaugeX, gaugeTop, gaugeW, gaugeH, 6);
+  ctx.stroke();
+
+  // Marker needle
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.moveTo(gaugeX - 6, fillY);
+  ctx.lineTo(gaugeX,     fillY - 4);
+  ctx.lineTo(gaugeX,     fillY + 4);
+  ctx.closePath();
+  ctx.fill();
+
+  // % labels at top/mid/bottom
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '8px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('60%', gaugeX + gaugeW / 2, gaugeTop + 8);
+  ctx.fillText('30%', gaugeX + gaugeW / 2, gaugeTop + gaugeH / 2);
+  ctx.fillText('5%',  gaugeX + gaugeW / 2, gaugeBot - 4);
+
+  // Big poll number (top-centre)
+  ctx.textAlign = 'center';
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.font = 'bold 38px Arial';
+  ctx.fillText(pollPct + '%', GW / 2 + 2, 52);
+  // Colour by poll health
+  ctx.fillStyle = pollPct >= 40 ? '#00DD55' : pollPct >= 28 ? '#FFD700' : '#FF4444';
+  ctx.fillText(pollPct + '%', GW / 2, 50);
+
+  // "NATIONAL POLLING" label
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = 'bold 9px Arial';
+  ctx.fillText('NATIONAL POLLING', GW / 2, 66);
+
+  // Days leading (top-left)
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.font = 'bold 13px Arial';
+  ctx.fillText('DAY ' + score, 10, 22);
+  ctx.fillStyle = 'white';
+  ctx.fillText('DAY ' + score, 9, 21);
+
+  ctx.restore();
+}
+
 // ── HUD ───────────────────────────────────────────────────────
 function drawHUD() {
-  ctx.save();
-  // Score shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  ctx.font = 'bold 40px Arial';
-  ctx.textAlign = 'center';
-  ctx.fillText(score, GW / 2 + 2, 57);
-  // Score
-  ctx.fillStyle = 'white';
-  ctx.fillText(score, GW / 2, 55);
-  ctx.restore();
+  // (poll gauge handles all HUD display now)
 }
 
 // ── Start screen ──────────────────────────────────────────────
@@ -742,12 +880,12 @@ function drawStart() {
   // Tagline
   ctx.fillStyle = '#FFD700';
   ctx.font = 'bold 13px Arial';
-  ctx.fillText('Navigate the bureaucracy!', GW / 2, GH / 2 + 44);
+  ctx.fillText('Stay high in the polls!', GW / 2, GH / 2 + 44);
 
   ctx.fillStyle = 'rgba(255,255,255,0.78)';
   ctx.font = '11.5px Arial';
-  ctx.fillText('Dodge Labour • Greens • Te Pāti Māori', GW / 2, GH / 2 + 63);
-  ctx.fillText("Don't land in the coalition zone!", GW / 2, GH / 2 + 80);
+  ctx.fillText('Tax cuts boost your poll numbers', GW / 2, GH / 2 + 63);
+  ctx.fillText("Dodge scandals & the opposition!", GW / 2, GH / 2 + 80);
 
   // Blinking tap prompt
   const pulse = 0.65 + 0.35 * Math.sin(Date.now() / 380);
@@ -813,11 +951,15 @@ function drawGameOver() {
 
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.font = '13px Arial';
-  ctx.fillText('PIPES OF RED TAPE SURVIVED', GW / 2, GH / 2 - 73);
+  ctx.fillText('DAYS LEADING IN THE POLLS', GW / 2, GH / 2 - 73);
 
   ctx.fillStyle = '#FFD700';
   ctx.font = 'bold 46px Arial';
-  ctx.fillText(score, GW / 2, GH / 2 - 28);
+  ctx.fillText(score, GW / 2, GH / 2 - 36);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '12px Arial';
+  ctx.fillText('Final poll: ' + pollPct + '%', GW / 2, GH / 2 - 14);
 
   // High score line
   if (score >= highScore && score > 0) {
