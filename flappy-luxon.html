@@ -79,8 +79,8 @@ const PLAYER_X    = 85;
 const GRAVITY     = 0.34;
 const JUMP_VEL    = -7.8;
 const PIPE_W      = 58;
-const PIPE_GAP    = 155;
-const PIPE_SPEED  = 2.4;
+const PIPE_GAP    = 180;
+const PIPE_SPEED  = 2.1;
 const PIPE_EVERY  = 95;   // frames between pipes
 const LEADER_EVERY_MIN = 260;
 const LEADER_EVERY_MAX = 450;
@@ -104,12 +104,13 @@ const POLS = {
     faceH:   0.55,
   },
   swarbrick: {
-    wiki:    'Chloë_Swarbrick',
-    name:    'Swarbrick',
-    party:   'Greens',
-    color:   '#00843D',
-    faceTop: 0.05,
-    faceH:   0.55,
+    wiki:      'Chloë_Swarbrick',
+    directUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Chl%C3%B6e_Swarbrick_NB_4-3_(cropped).jpg',
+    name:      'Swarbrick',
+    party:     'Greens',
+    color:     '#00843D',
+    faceTop:   0.05,
+    faceH:     0.55,
   },
   waititi: {
     wiki:    'Rawiri_Waititi',
@@ -127,11 +128,16 @@ const imgs = {};   // key → HTMLImageElement or null
 async function loadPoliticianImage(key) {
   const pol = POLS[key];
   try {
-    const res  = await fetch(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pol.wiki)}`
-    );
-    const data = await res.json();
-    const src  = data.thumbnail?.source;
+    let src = pol.directUrl ?? null;
+
+    if (!src) {
+      const res  = await fetch(
+        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pol.wiki)}`
+      );
+      const data = await res.json();
+      src = data.thumbnail?.source ?? null;
+    }
+
     if (!src) { imgs[key] = null; return; }
 
     await new Promise(resolve => {
