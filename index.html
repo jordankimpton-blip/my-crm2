@@ -120,6 +120,14 @@ const POLS = {
     faceTop: 0.05,
     faceH:   0.55,
   },
+  peters: {
+    wiki:    'Winston_Peters',
+    name:    'Peters',
+    party:   'NZ First',
+    color:   '#111111',
+    faceTop: 0.05,
+    faceH:   0.55,
+  },
 };
 
 const imgs = {};   // key → HTMLImageElement or null
@@ -224,6 +232,12 @@ function playDeath() {
     setTimeout(() => beep(f, 0.12, 'sawtooth', 0.15), i * 80)
   );
 }
+function playCelebration() {
+  [523, 659, 784, 1047].forEach((f, i) =>
+    setTimeout(() => beep(f, 0.15, 'sine', 0.12), i * 80)
+  );
+}
+function playPetersWarning() { beep(200, 0.25, 'sawtooth', 0.1); }
 
 // ── Game state ────────────────────────────────────────────────
 let state     = 'start';  // 'start' | 'playing' | 'dead'
@@ -253,18 +267,32 @@ let clouds = [
 
 let nextPipe   = 100;
 let nextLeader = 300;
+let nextPeters = 480;
+
+// Winston Peters obstacles (erratic movement)
+let petersObstacles = [];
+
+// Milestone celebration flashes
+let milestoneFlashes = [];
+let majorityShown    = false;  // reset per game
+let prevPollPct      = 38;
 
 // ── Reset ─────────────────────────────────────────────────────
 function reset() {
   player   = { x: PLAYER_X, y: GH / 2, vy: 0, rotation: 0 };
   pipes    = [];
   leaders  = [];
+  petersObstacles = [];
   taxFlashes = [];
+  milestoneFlashes = [];
   particles  = [];
   frame    = 0;
   score    = 0;
   nextPipe   = 100;
   nextLeader = 300;
+  nextPeters = 480;
+  majorityShown = false;
+  prevPollPct   = 38;
 }
 
 // ── Input ─────────────────────────────────────────────────────
@@ -330,10 +358,42 @@ function update() {
   frame++;
 
   // Update poll percentage
+  prevPollPct = pollPct;
   pollPct = getPollPct();
 
   // Score = days leading (increment every ~2 seconds of survival)
   if (frame % 120 === 0) score++;
+
+  // ── Difficulty ramp (speed increases with days survived) ──
+  const dynamicSpeed = Math.min(4.2, 2.1 + score * 0.06);
+
+  // ── Milestone: Majority Government ──
+  if (pollPct >= 50 && prevPollPct < 50 && !majorityShown) {
+    majorityShown = true;
+    milestoneFlashes.push({
+      text: 'MAJORITY GOVERNMENT! 🎉',
+      x: GW / 2, y: GH * 0.38,
+      alpha: 1, scale: 0.3, vy: -0.3,
+    });
+    playCelebration();
+  }
+  if (pollPct >= 57 && prevPollPct < 57) {
+    milestoneFlashes.push({
+      text: 'LANDSLIDE! 🎊',
+      x: GW / 2, y: GH * 0.32,
+      alpha: 1, scale: 0.3, vy: -0.3,
+    });
+    playCelebration();
+  }
+
+  // Update milestone flashes
+  for (let i = milestoneFlashes.length - 1; i >= 0; i--) {
+    const m = milestoneFlashes[i];
+    m.alpha -= 0.008;
+    m.scale  = Math.min(1.5, m.scale + 0.05);
+    m.y     += m.vy;
+    if (m.alpha <= 0) milestoneFlashes.splice(i, 1);
+  }
 
   // ── Player ──
   player.vy += GRAVITY;
@@ -364,7 +424,7 @@ function update() {
 
   for (let i = pipes.length - 1; i >= 0; i--) {
     const p = pipes[i];
-    p.x -= PIPE_SPEED;
+    p.x -= dynamicSpeed;
 
     if (!p.scored && p.x + PIPE_W < player.x) {
       p.scored = true;
@@ -405,6 +465,40 @@ function update() {
       die(); return;
     }
     if (l.x + 50 < 0) leaders.splice(i, 1);
+  }
+
+  // ── Winston Peters (erratic wildcard) ──
+  if (frame >= nextPeters) {
+    petersObstacles.push({
+      x:       GW + 60,
+      y:       130 + Math.random() * (GH - GROUND_H - 280),
+      vy:      (Math.random() - 0.5) * 5,
+      spd:     3.0 + Math.random() * 0.8,
+      nextJolt: frame + 18 + Math.floor(Math.random() * 22),
+    });
+    playPetersWarning();
+    nextPeters = frame + 520 + Math.floor(Math.random() * 280);
+  }
+
+  for (let i = petersObstacles.length - 1; i >= 0; i--) {
+    const p = petersObstacles[i];
+    p.x -= p.spd + (dynamicSpeed - 2.1) * 0.5; // also speeds up with difficulty
+    p.y += p.vy;
+
+    // Random direction jolts — that's just Winston
+    if (frame >= p.nextJolt) {
+      p.vy = (Math.random() - 0.5) * 7;
+      p.nextJolt = frame + 12 + Math.floor(Math.random() * 20);
+    }
+
+    // Bounce off ceiling / ground
+    if (p.y < 40)                   { p.y = 40;                   p.vy =  Math.abs(p.vy); }
+    if (p.y > GH - GROUND_H - 50)  { p.y = GH - GROUND_H - 50;  p.vy = -Math.abs(p.vy); }
+
+    if (Math.hypot(player.x - p.x, player.y - p.y) < PLAYER_R + 30) {
+      die(); return;
+    }
+    if (p.x + 60 < 0) petersObstacles.splice(i, 1);
   }
 
   // ── Tax cut flashes ──
@@ -466,12 +560,14 @@ function draw() {
   if (state !== 'start') drawPollGrid();
   drawPipes();
   drawLeaders();
+  drawPeters();
   drawGround();
 
   drawParticles();
   drawPlayer();
 
   drawTaxFlashes();
+  drawMilestoneFlashes();
 
   if (state === 'playing' || state === 'dead') drawHUD();
   if (state === 'playing' || state === 'dead') drawPollGauge();
@@ -587,6 +683,83 @@ function drawLeaders() {
     ctx.fillStyle = 'rgba(255,255,255,0.65)';
     ctx.font = '8px Arial';
     ctx.fillText(pol.party, l.x, l.y + 62);
+  }
+}
+
+// ── Winston Peters (wildcard) ─────────────────────────────────
+function drawPeters() {
+  for (const p of petersObstacles) {
+    // Warning glow — black/gold aura, larger than other leaders
+    const glow = ctx.createRadialGradient(p.x, p.y, 12, p.x, p.y, 62);
+    glow.addColorStop(0, 'rgba(255,215,0,0.35)');
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 62, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Slightly larger than regular leaders
+    drawFace('peters', p.x, p.y, 36);
+
+    // ⚠️ warning badge top-left of face
+    ctx.save();
+    ctx.translate(p.x - 30, p.y - 30);
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.fillStyle = '#FFD700';
+    ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.font = 'bold 11px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⚠', 0, 0);
+    ctx.restore();
+
+    // Name pill
+    const tw = ctx.measureText('WINSTON').width + 16;
+    ctx.fillStyle = '#111111';
+    rRect(p.x - tw / 2, p.y + 39, tw, 18, 9);
+    ctx.fill();
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 1.5;
+    rRect(p.x - tw / 2, p.y + 39, tw, 18, 9);
+    ctx.stroke();
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 10px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('WINSTON', p.x, p.y + 52);
+
+    ctx.fillStyle = 'rgba(255,215,0,0.6)';
+    ctx.font = '8px Arial';
+    ctx.fillText('Unpredictable', p.x, p.y + 66);
+  }
+}
+
+// ── Milestone celebration flashes ─────────────────────────────
+function drawMilestoneFlashes() {
+  for (const m of milestoneFlashes) {
+    ctx.save();
+    ctx.globalAlpha = m.alpha;
+    ctx.translate(m.x, m.y);
+    ctx.scale(m.scale, m.scale);
+
+    // Outer glow
+    ctx.fillStyle = 'rgba(0,200,80,0.25)';
+    ctx.font = 'bold 36px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(m.text, 0, 0);
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillText(m.text, 3, 3);
+
+    // Main — bright green/gold shimmer
+    const hue = Math.sin(Date.now() / 150);
+    ctx.fillStyle = hue > 0 ? '#00EE66' : '#FFD700';
+    ctx.fillText(m.text, 0, 0);
+
+    ctx.restore();
   }
 }
 
@@ -792,6 +965,17 @@ function drawPollGauge() {
   ctx.fillText('DAY ' + score, 10, 22);
   ctx.fillStyle = 'white';
   ctx.fillText('DAY ' + score, 9, 21);
+
+  // Difficulty label (top-right)
+  const spd = Math.min(4.2, 2.1 + score * 0.06);
+  const termNum = spd < 2.7 ? 1 : spd < 3.3 ? 2 : spd < 3.9 ? 3 : 4;
+  const termColour = ['#00DD55','#FFD700','#FF8800','#FF4444'][termNum - 1];
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.font = 'bold 11px Arial';
+  ctx.fillText('TERM ' + termNum, GW - 9, 22);
+  ctx.fillStyle = termColour;
+  ctx.fillText('TERM ' + termNum, GW - 10, 21);
 
   ctx.restore();
 }
