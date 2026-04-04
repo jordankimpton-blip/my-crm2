@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Flappy Luxon</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a1a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
+    }
+    #gameCanvas {
+      display: block;
+      image-rendering: pixelated;
+      touch-action: none;
+    }
+    #loading {
+      position: absolute;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 18px;
+      text-align: center;
+    }
+    #loading .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(255,255,255,0.2);
+      border-top-color: #FFD700;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 12px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div id="loading">
+  <div class="spinner"></div>
+  Loading politicians...
+</div>
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx    = canvas.getContext('2d');
+const loading = document.getElementById('loading');
+
+const GW = 390;
+const GH = 700;
+
+function resize() {
+  const r = Math.min(window.innerWidth / GW, window.innerHeight / GH);
+  canvas.style.width  = Math.floor(GW * r) + 'px';
+  canvas.style.height = Math.floor(GH * r) + 'px';
+  canvas.width  = GW;
+  canvas.height = GH;
+}
+resize();
+window.addEventListener('resize', resize);
+
+const GROUND_H    = 85;
+const PLAYER_R    = 30;
+const PLAYER_X    = 85;
+const GRAVITY     = 0.34;
+const JUMP_VEL    = -7.8;
+const PIPE_W      = 58;
+const PIPE_GAP    = 155;
+const PIPE_SPEED  = 2.4;
+const PIPE_EVERY  = 95;
+const LEADER_EVERY_MIN = 260;
+const LEADER_EVERY_MAX = 450;
+
+const POLS = {
+  luxon:     { wiki: 'Christopher_Luxon', name: 'Luxon',    party: 'National',      color: '#003DA5', faceTop: 0.05, faceH: 0.55 },
+  hipkins:   { wiki: 'Chris_Hipkins',     name: 'Hipkins',  party: 'Labour',        color: '#CC0000', faceTop: 0.05, faceH: 0.55 },
+  swarbrick: { wiki: 'Chlo\u00eb_Swarbrick', name: 'Swarbrick', party: 'Greens',   color: '#00843D', faceTop: 0.05, faceH: 0.55 },
+  waititi:   { wiki: 'Rawiri_Waititi',    name: 'Waititi',  party: 'Te P\u0101ti M\u0101ori', color: '#8B0000', faceTop: 0.05, faceH: 0.55 },
+};
+
+const imgs = {};
+
+async function loadPoliticianImage(key) {
+  const pol = POLS[key];
+  try {
+    const res  = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pol.wiki)}`);
+    const data = await res.json();
+    const src  = data.thumbnail?.source;
+    if (!src) { imgs[key] = null; return; }
+    await new Promise(resolve => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload  = () => { imgs[key] = img; resolve(); };
+      img.onerror = () => { imgs[key] = null;  resolve(); };
+      img.src = src;
+    });
+  } catch (_) { imgs[key] = null; }
+}
+
+function drawFace(key, cx, cy, r, rotation = 0) {
+  const pol = POLS[key];
+  const img = imgs[key];
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (rotation) ctx.rotate(rotation);
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.closePath();
+  if (img) {
+    ctx.clip();
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const srcY = ih * pol.faceTop, srcH = ih * pol.faceH;
+    const scale = (r * 2) / Math.min(iw, srcH);
+    ctx.drawImage(img, 0, srcY, iw, srcH, -(iw * scale) / 2, -r, iw * scale, srcH * scale);
+  } else {
+    ctx.fillStyle = pol.color; ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = `bold ${Math.round(r * 0.9)}px Arial`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(pol.name[0], 0, 1);
+  }
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2.5; ctx.stroke();
+}
+
+let audioCtx;
+function ac() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); return audioCtx; }
+function beep(freq, dur, type = 'sine', vol = 0.12) {
+  try {
+    const a = ac(), o = a.createOscillator(), g = a.createGain();
+    o.connect(g); g.connect(a.destination);
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + dur);
+    o.start(); o.stop(a.currentTime + dur);
+  } catch (_) {}
+}
+function playScore() { beep(880, 0.08, 'sine', 0.1); }
+function playJump()  { beep(520, 0.06, 'square', 0.07); }
+function playDeath() { [280,240,200,160].forEach((f,i) => setTimeout(() => beep(f, 0.12, 'sawtooth', 0.15), i * 80)); }
+
+let state = 'start', score = 0, highScore = 0, frame = 0;
+let player = { x: PLAYER_X, y: GH / 2, vy: 0, rotation: 0 };
+let pipes = [], leaders = [], taxFlashes = [], particles = [];
+let clouds = [{ x:60,y:70,w:90,spd:0.25 },{ x:240,y:130,w:65,spd:0.18 },{ x:330,y:55,w:50,spd:0.32 }];
+let nextPipe = 100, nextLeader = 300;
+
+function reset() {
+  player = { x: PLAYER_X, y: GH / 2, vy: 0, rotation: 0 };
+  pipes = []; leaders = []; taxFlashes = []; particles = [];
+  frame = 0; score = 0; nextPipe = 100; nextLeader = 300;
+}
+
+function tap() {
+  if (state === 'start') { state = 'playing'; player.vy = JUMP_VEL; playJump(); return; }
+  if (state === 'dead')  { reset(); state = 'start'; return; }
+  player.vy = JUMP_VEL; playJump();
+  const variants = ['TAX CUT! \uD83D\uDCB0','TRICKLE DOWN! \uD83D\uDCC9','TAX CUT! \uD83C\uDFE6','LESS TAX! \uD83D\uDCB8','CUT RED TAPE! \u2702\uFE0F'];
+  taxFlashes.push({ text: variants[Math.floor(Math.random()*variants.length)], x: GW/2, y: GH*0.28+(Math.random()*80-40), alpha:1, scale:0.4, vy:-0.6 });
+  for (let i=0;i<6;i++) { const a=(Math.PI*2*i)/6; particles.push({ x:player.x,y:player.y,vx:Math.cos(a)*(1.5+Math.random()),vy:Math.sin(a)*(1.5+Math.random()),life:1,color:['#FFD700','#003DA5','#FFFFFF'][i%3] }); }
+}
+
+canvas.addEventListener('touchstart', e => { e.preventDefault(); tap(); }, { passive: false });
+canvas.addEventListener('mousedown',  e => { e.preventDefault(); tap(); });
+document.addEventListener('keydown',  e => { if (e.code==='Space'||e.code==='ArrowUp') tap(); });
+
+function circRect(cx,cy,cr,rx,ry,rw,rh) {
+  return Math.hypot(cx-Math.max(rx,Math.min(cx,rx+rw)), cy-Math.max(ry,Math.min(cy,ry+rh))) < cr;
+}
+
+function update() {
+  if (state !== 'playing') return;
+  frame++;
+  player.vy += GRAVITY; player.y += player.vy;
+  player.rotation = Math.max(-0.45, Math.min(0.9, player.vy * 0.075));
+  if (player.y - PLAYER_R < 0) { player.y = PLAYER_R; player.vy = 1; }
+  if (player.y + PLAYER_R >= GH - GROUND_H) { die(); return; }
+  if (frame >= nextPipe) {
+    const gapY = 110 + Math.random() * (GH - GROUND_H - PIPE_GAP - 190);
+    pipes.push({ x: GW + PIPE_W, gapY, scored: false });
+    nextPipe = frame + PIPE_EVERY;
+  }
+  for (let i=pipes.length-1;i>=0;i--) {
+    const p=pipes[i]; p.x -= PIPE_SPEED;
+    if (!p.scored && p.x+PIPE_W < player.x) { p.scored=true; score++; playScore(); }
+    if (circRect(player.x,player.y,PLAYER_R-3,p.x,0,PIPE_W,p.gapY)) { die(); return; }
+    if (circRect(player.x,player.y,PLAYER_R-3,p.x,p.gapY+PIPE_GAP,PIPE_W,GH)) { die(); return; }
+    if (p.x+PIPE_W<0) pipes.splice(i,1);
+  }
+  if (frame >= nextLeader) {
+    const types=['hipkins','swarbrick','waititi'];
+    leaders.push({ type:types[Math.floor(Math.random()*3)], x:GW+50, y:90+Math.random()*(GH-GROUND_H-220), spd:2.2+Math.random()*1.4, wobble:Math.random()*Math.PI*2 });
+    nextLeader = frame + LEADER_EVERY_MIN + Math.floor(Math.random()*(LEADER_EVERY_MAX-LEADER_EVERY_MIN));
+  }
+  for (let i=leaders.length-1;i>=0;i--) {
+    const l=leaders[i]; l.x-=l.spd; l.wobble+=0.045; l.y+=Math.sin(l.wobble)*0.9;
+    if (Math.hypot(player.x-l.x,player.y-l.y) < PLAYER_R+28) { die(); return; }
+    if (l.x+50<0) leaders.splice(i,1);
+  }
+  for (let i=taxFlashes.length-1;i>=0;i--) { const t=taxFlashes[i]; t.alpha-=0.022; t.scale=Math.min(1.4,t.scale+0.075); t.y+=t.vy; if(t.alpha<=0) taxFlashes.splice(i,1); }
+  for (let i=particles.length-1;i>=0;i--) { const p=particles[i]; p.x+=p.vx; p.y+=p.vy; p.vy+=0.12; p.life-=0.045; if(p.life<=0) particles.splice(i,1); }
+  for (const c of clouds) { c.x-=c.spd; if(c.x+c.w<0) c.x=GW+c.w; }
+}
+
+function die() { state='dead'; if(score>highScore) highScore=score; playDeath(); }
+
+function rRect(x,y,w,h,r) {
+  ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r); ctx.lineTo(x+r,y+h);
+  ctx.arcTo(x,y+h,x,y+h-r,r); ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r); ctx.closePath();
+}
+
+function draw() {
+  const sky=ctx.createLinearGradient(0,0,0,GH); sky.addColorStop(0,'#5BBCE8'); sky.addColorStop(1,'#A8DEFF');
+  ctx.fillStyle=sky; ctx.fillRect(0,0,GW,GH);
+  drawClouds(); drawPipes(); drawLeaders(); drawGround();
+  if (state!=='start') { drawParticles(); drawPlayer(); }
+  drawTaxFlashes();
+  if (state==='playing'||state==='dead') drawHUD();
+  if (state==='start') drawStart();
+  if (state==='dead')  drawGameOver();
+}
+
+function drawClouds() {
+  ctx.fillStyle='rgba(255,255,255,0.72)';
+  for (const c of clouds) {
+    const h=c.w*0.45;
+    rRect(c.x,c.y,c.w,h,h/2); ctx.fill();
+    rRect(c.x+c.w*0.1,c.y-h*0.4,c.w*0.75,h*0.9,h*0.45); ctx.fill();
+    rRect(c.x+c.w*0.35,c.y-h*0.6,c.w*0.5,h*0.9,h*0.45); ctx.fill();
+  }
+}
+
+function drawPipes() {
+  for (const p of pipes) {
+    drawBureauPipe(p.x,0,PIPE_W,p.gapY,'top');
+    drawBureauPipe(p.x,p.gapY+PIPE_GAP,PIPE_W,GH-GROUND_H-(p.gapY+PIPE_GAP),'bot');
+  }
+}
+
+function drawBureauPipe(x,y,w,h,end) {
+  if (h<=0) return;
+  const bg=ctx.createLinearGradient(x,0,x+w,0); bg.addColorStop(0,'#2c2c2c'); bg.addColorStop(0.4,'#454545'); bg.addColorStop(1,'#1a1a1a');
+  ctx.fillStyle=bg; ctx.fillRect(x,y,w,h);
+  ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+  ctx.strokeStyle='rgba(200,0,0,0.55)'; ctx.lineWidth=7;
+  for (let s=-h;s<w+h;s+=18) { ctx.beginPath(); ctx.moveTo(x+s,y); ctx.lineTo(x+s+h,y+h); ctx.stroke(); }
+  ctx.restore();
+  const capH=22, cg=ctx.createLinearGradient(x-6,0,x+w+6,0);
+  cg.addColorStop(0,'#383838'); cg.addColorStop(0.5,'#5a5a5a'); cg.addColorStop(1,'#303030');
+  ctx.fillStyle=cg;
+  if (end==='top') { ctx.fillRect(x-6,y+h-capH,w+12,capH); } else { ctx.fillRect(x-6,y,w+12,capH); }
+  if (h>55) {
+    ctx.save(); ctx.translate(x+w/2,y+h/2); ctx.rotate(-Math.PI/2);
+    ctx.fillStyle='rgba(255,220,80,0.75)'; ctx.font='bold 9px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('BUREAUCRACY',0,0); ctx.restore();
+  }
+}
+
+function drawLeaders() {
+  for (const l of leaders) {
+    const pol=POLS[l.type];
+    const glow=ctx.createRadialGradient(l.x,l.y,10,l.x,l.y,50);
+    glow.addColorStop(0,pol.color+'55'); glow.addColorStop(1,'transparent');
+    ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(l.x,l.y,50,0,Math.PI*2); ctx.fill();
+    drawFace(l.type,l.x,l.y,32);
+    const tw=ctx.measureText(pol.name).width+16;
+    ctx.fillStyle=pol.color; rRect(l.x-tw/2,l.y+35,tw,18,9); ctx.fill();
+    ctx.fillStyle='white'; ctx.font='bold 10px Arial'; ctx.textAlign='center'; ctx.fillText(pol.name,l.x,l.y+48);
+    ctx.fillStyle='rgba(255,255,255,0.65)'; ctx.font='8px Arial'; ctx.fillText(pol.party,l.x,l.y+62);
+  }
+}
+
+function drawGround() {
+  const gy=GH-GROUND_H, half=GW/2;
+  const ag=ctx.createLinearGradient(0,gy,0,GH); ag.addColorStop(0,'#F5C400'); ag.addColorStop(1,'#C9A000');
+  ctx.fillStyle=ag; ctx.fillRect(0,gy,half,GROUND_H);
+  const ng=ctx.createLinearGradient(half,gy,half,GH); ng.addColorStop(0,'#222222'); ng.addColorStop(1,'#111111');
+  ctx.fillStyle=ng; ctx.fillRect(half,gy,half,GROUND_H);
+  ctx.fillStyle='#1a1a1a'; ctx.fillRect(0,gy,GW,4);
+  ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=1.5; ctx.setLineDash([6,4]);
+  ctx.beginPath(); ctx.moveTo(half,gy); ctx.lineTo(half,GH); ctx.stroke(); ctx.setLineDash([]);
+  ctx.textAlign='center';
+  ctx.fillStyle='#1a1a1a'; ctx.font='bold 18px Arial'; ctx.fillText('ACT',half/2,gy+26);
+  ctx.font='10px Arial'; ctx.fillStyle='#333'; ctx.fillText('David Seymour',half/2,gy+42);
+  ctx.font='9px Arial'; ctx.fillStyle='#555'; ctx.fillText('\u2702\uFE0F  Cut. Everything.',half/2,gy+58);
+  ctx.font='8px Arial'; ctx.fillStyle='#777'; ctx.fillText('Regulatory Standards Bill \u221E',half/2,gy+72);
+  ctx.fillStyle='#FFD700'; ctx.font='bold 14px Arial'; ctx.fillText('NZ FIRST',half+(GW-half)/2,gy+24);
+  ctx.font='10px Arial'; ctx.fillStyle='#aaa'; ctx.fillText('Winston Peters',half+(GW-half)/2,gy+40);
+  ctx.font='9px Arial'; ctx.fillStyle='#888'; ctx.fillText('\uD83C\uDFA9  Back Again (seriously)',half+(GW-half)/2,gy+55);
+  ctx.font='8px Arial'; ctx.fillStyle='#666'; ctx.fillText('Est. 1993, 1996, 2008\u2026',half+(GW-half)/2,gy+70);
+}
+
+function drawPlayer() {
+  ctx.save(); ctx.globalAlpha=0.18;
+  ctx.beginPath(); ctx.ellipse(player.x,GH-GROUND_H-4,PLAYER_R*0.8,5,0,0,Math.PI*2);
+  ctx.fillStyle='#000'; ctx.fill(); ctx.restore();
+  drawFace('luxon',player.x,player.y,PLAYER_R,player.rotation);
+  ctx.save(); ctx.translate(player.x+PLAYER_R-7,player.y-PLAYER_R+7);
+  ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fillStyle='#003DA5'; ctx.fill();
+  ctx.strokeStyle='#FFD700'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.fillStyle='white'; ctx.font='bold 7px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('PM',0,0.5); ctx.restore();
+}
+
+function drawTaxFlashes() {
+  for (const t of taxFlashes) {
+    ctx.save(); ctx.globalAlpha=t.alpha; ctx.translate(t.x,t.y); ctx.scale(t.scale,t.scale);
+    ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.font='bold 34px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(t.text,3,3);
+    ctx.fillStyle=Math.sin(Date.now()/120)>0?'#FFD700':'#FFFFFF'; ctx.fillText(t.text,0,0); ctx.restore();
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) { ctx.save(); ctx.globalAlpha=p.life*0.8; ctx.beginPath(); ctx.arc(p.x,p.y,3*p.life,0,Math.PI*2); ctx.fillStyle=p.color; ctx.fill(); ctx.restore(); }
+}
+
+function drawHUD() {
+  ctx.save(); ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.font='bold 40px Arial'; ctx.textAlign='center'; ctx.fillText(score,GW/2+2,57);
+  ctx.fillStyle='white'; ctx.fillText(score,GW/2,55); ctx.restore();
+}
+
+function drawStart() {
+  ctx.save(); ctx.fillStyle='rgba(0,35,105,0.88)'; rRect(GW/2-158,GH/2-220,316,420,22); ctx.fill();
+  ctx.strokeStyle='#FFD700'; ctx.lineWidth=2; rRect(GW/2-158,GH/2-220,316,420,22); ctx.stroke(); ctx.restore();
+  ctx.textAlign='center';
+  ctx.fillStyle='#FFD700'; ctx.font='bold 52px Arial'; ctx.fillText('FLAPPY',GW/2,GH/2-148);
+  ctx.fillStyle='white'; ctx.font='bold 48px Arial'; ctx.fillText('LUXON',GW/2,GH/2-100);
+  drawFace('luxon',GW/2,GH/2-28,48);
+  ctx.fillStyle='#FFD700'; ctx.font='bold 13px Arial'; ctx.fillText('Navigate the bureaucracy!',GW/2,GH/2+44);
+  ctx.fillStyle='rgba(255,255,255,0.78)'; ctx.font='11.5px Arial';
+  ctx.fillText('Dodge Labour \u2022 Greens \u2022 Te P\u0101ti M\u0101ori',GW/2,GH/2+63);
+  ctx.fillText("Don't land in the coalition zone!",GW/2,GH/2+80);
+  const pulse=0.65+0.35*Math.sin(Date.now()/380);
+  ctx.globalAlpha=pulse; ctx.fillStyle='white'; ctx.font='bold 20px Arial'; ctx.fillText('TAP TO START',GW/2,GH/2+128); ctx.globalAlpha=1;
+  if (highScore>0) { ctx.fillStyle='#FFD700'; ctx.font='13px Arial'; ctx.fillText('\uD83C\uDFC6 Best: '+highScore,GW/2,GH/2+160); }
+}
+
+function drawGameOver() {
+  ctx.fillStyle='rgba(0,0,0,0.72)'; ctx.fillRect(0,0,GW,GH);
+  ctx.save(); const pg=ctx.createLinearGradient(GW/2-158,0,GW/2+158,0);
+  pg.addColorStop(0,'#A80000'); pg.addColorStop(0.5,'#CC0000'); pg.addColorStop(1,'#A80000');
+  ctx.fillStyle=pg; rRect(GW/2-158,GH/2-228,316,440,22); ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1.5; rRect(GW/2-158,GH/2-228,316,440,22); ctx.stroke(); ctx.restore();
+  ctx.textAlign='center';
+  ctx.fillStyle='white'; ctx.font='bold 26px Arial'; ctx.fillText('NATIONAL DROPPED',GW/2,GH/2-177);
+  ctx.font='bold 24px Arial'; ctx.fillText('IN THE POLLS',GW/2,GH/2-148);
+  ctx.fillStyle='#FFD700'; ctx.font='italic 15px Georgia'; ctx.fillText('Tax cuts: Ineffective',GW/2,GH/2-120);
+  ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(GW/2-120,GH/2-104); ctx.lineTo(GW/2+120,GH/2-104); ctx.stroke();
+  ctx.fillStyle='rgba(0,0,0,0.35)'; rRect(GW/2-108,GH/2-96,216,80,12); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.font='13px Arial'; ctx.fillText('PIPES OF RED TAPE SURVIVED',GW/2,GH/2-73);
+  ctx.fillStyle='#FFD700'; ctx.font='bold 46px Arial'; ctx.fillText(score,GW/2,GH/2-28);
+  if (score>=highScore&&score>0) { ctx.fillStyle='#FFD700'; ctx.font='bold 13px Arial'; ctx.fillText('\uD83C\uDFC6 NEW RECORD!',GW/2,GH/2+10); }
+  else { ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='12px Arial'; ctx.fillText('Best: '+highScore,GW/2,GH/2+10); }
+  ctx.fillStyle='rgba(255,255,255,0.82)'; ctx.font='italic 11.5px Georgia';
+  ctx.fillText('"He navigated the bureaucracy\u2026',GW/2,GH/2+50);
+  ctx.fillText('straight into coalition talks."',GW/2,GH/2+65);
+  ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.font='10px Georgia'; ctx.fillText('\u2014 NZ Herald, probably',GW/2,GH/2+82);
+  const pulse=0.7+0.3*Math.sin(Date.now()/380);
+  ctx.globalAlpha=pulse; ctx.fillStyle='white'; ctx.font='bold 19px Arial'; ctx.fillText('TAP TO TRY AGAIN',GW/2,GH/2+128); ctx.globalAlpha=1;
+  ctx.fillStyle='rgba(255,255,255,0.38)'; ctx.font='10px Arial'; ctx.fillText('(The economy cannot be fixed in one term)',GW/2,GH/2+150);
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+(async () => {
+  await Promise.all(Object.keys(POLS).map(loadPoliticianImage));
+  loading.style.display = 'none';
+  loop();
+})();
+</script>
+</body>
+</html>
