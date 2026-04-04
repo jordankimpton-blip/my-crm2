@@ -104,9 +104,9 @@ const POLS = {
     faceH:   0.55,
   },
   swarbrick: {
-    wiki:      'Chloë_Swarbrick',
-    directUrl: 'https://commons.wikimedia.org/wiki/Special:FilePath/Chl%C3%B6e_Swarbrick_NB_4-3_(cropped).jpg',
-    name:      'Swarbrick',
+    wiki:     'Chloë_Swarbrick',
+    wikiFile: 'Chlöe_Swarbrick_NB_4-3_(cropped).jpg',
+    name:     'Swarbrick',
     party:     'Greens',
     color:     '#00843D',
     faceTop:   0.05,
@@ -136,7 +136,17 @@ const imgs = {};   // key → HTMLImageElement or null
 async function loadPoliticianImage(key) {
   const pol = POLS[key];
   try {
-    let src = pol.directUrl ?? null;
+    let src = null;
+
+    if (pol.wikiFile) {
+      // Fetch direct URL from Commons API — avoids redirect CORS issues
+      const res  = await fetch(
+        `https://commons.wikimedia.org/w/api.php?action=query&titles=File:${encodeURIComponent(pol.wikiFile)}&prop=imageinfo&iiprop=url&format=json&origin=*`
+      );
+      const data = await res.json();
+      const pages = data.query?.pages ?? {};
+      src = Object.values(pages)[0]?.imageinfo?.[0]?.url ?? null;
+    }
 
     if (!src) {
       const res  = await fetch(
