@@ -128,7 +128,71 @@ const POLS = {
     faceTop: 0.05,
     faceH:   0.55,
   },
+  seymour: {
+    wiki:    'David_Seymour_(politician)',
+    name:    'Seymour',
+    party:   'ACT',
+    color:   '#F5C400',
+    faceTop: 0.05,
+    faceH:   0.55,
+  },
 };
+
+// ── Mode config ───────────────────────────────────────────────
+const MODES = {
+  luxon: {
+    player:      'luxon',
+    playerLabel: 'Chris Luxon',
+    party:       'National',
+    accentColor: '#003DA5',
+    leaders:     ['hipkins', 'swarbrick', 'waititi'],
+    tapTexts:    ['TAX CUT! 💰','TRICKLE DOWN! 📉','TAX CUT! 🏦','LESS TAX! 💸','CUT RED TAPE! ✂️'],
+    particleColors: ['#FFD700','#003DA5','#FFFFFF'],
+    pipeLabels:  ['CONSENT SCANDAL','COST OF LIVING','MEDIA CRITICISM','POLL DROP',
+                  'HOUSING CRISIS','BENEFIT CUTS','SCHOOL LUNCH','HEALTH CUTS',
+                  'MĀORI POLICY','WATER QUALITY','CRIME STATS','BROKEN PROMISE',
+                  'INFLATION','INTEREST RATES','PRIVATISATION'],
+    groundLeft:  { c1:'#F5C400', c2:'#C9A000', title:'ACT',      tc:'#1a1a1a', sub1:'David Seymour',  sub2:'✂️  Cut. Everything.',      sub3:'Regulatory Standards Bill ∞' },
+    groundRight: { c1:'#222222', c2:'#111111', title:'NZ FIRST',  tc:'#FFD700', sub1:'Winston Peters', sub2:'🎩  Back Again (seriously)', sub3:'Est. 1993, 1996, 2008…' },
+    gameOver1:   'NATIONAL DROPPED',
+    gameOver2:   'IN THE POLLS',
+    gameOverSub: 'Tax cuts: Ineffective',
+    quote1:      '"He navigated the bureaucracy…',
+    quote2:      'straight into coalition talks."',
+    majorityText:'MAJORITY GOVERNMENT! 🎉',
+    landslide:   'LANDSLIDE! 🎊',
+    startSub1:   'Tax cuts boost your poll numbers',
+    startSub2:   'Dodge scandals & the opposition!',
+    highScores:  { days: 0 },
+  },
+  hipkins: {
+    player:      'hipkins',
+    playerLabel: 'Chris Hipkins',
+    party:       'Labour',
+    accentColor: '#CC0000',
+    leaders:     ['luxon', 'seymour'],   // peters is always the wildcard
+    tapTexts:    ['FREE LUNCH! 🍎','TAXPAYER DOLLARS! 💸','WELFARE BOOST! 💰',
+                  'PUBLIC SPENDING! 🏥','VOTE FOR CHANGE! 🌹','BENEFITS! 🏛️'],
+    particleColors: ['#CC0000','#FF6666','#FFFFFF'],
+    pipeLabels:  ['AUSTERITY','WAGE FREEZE','PRIVATISATION','USER PAYS',
+                  'TAX CUTS FOR RICH','VIBE CRISIS','TRUST ISSUES','BENEFIT CUTS',
+                  'SCHOOL FEES','HOSPITAL WAIT LISTS','HOUSING SHORTAGE','BROKEN PROMISES'],
+    groundLeft:  { c1:'#003DA5', c2:'#002a80', title:'NATIONAL',  tc:'#FFD700', sub1:'Chris Luxon',    sub2:'✂️  More Tax Cuts',           sub3:'Trickle Down Economics' },
+    groundRight: { c1:'#F5C400', c2:'#C9A000', title:'ACT',       tc:'#1a1a1a', sub1:'David Seymour',  sub2:'🗡️  Cut. Everything.',         sub3:'Regulatory Standards Bill ∞' },
+    gameOver1:   'LABOUR FAILED',
+    gameOver2:   'TO CUT THROUGH',
+    gameOverSub: 'The vibes were off...',
+    quote1:      '"He tried so hard to connect…',
+    quote2:      'but the message didn\'t land."',
+    majorityText:'PROGRESSIVE MAJORITY! 🌹',
+    landslide:   'LABOUR LANDSLIDE! 🌹',
+    startSub1:   'Spending boosts your poll numbers',
+    startSub2:   'Dodge the right-wing opposition!',
+    highScores:  { days: 0 },
+  },
+};
+
+let gameMode = 'luxon'; // current mode — set at character select
 
 const imgs = {};   // key → HTMLImageElement or null
 
@@ -250,7 +314,7 @@ function playCelebration() {
 function playPetersWarning() { beep(200, 0.25, 'sawtooth', 0.1); }
 
 // ── Game state ────────────────────────────────────────────────
-let state     = 'start';  // 'start' | 'playing' | 'dead'
+let state     = 'select';  // 'select' | 'start' | 'playing' | 'dead'
 let score     = 0;  // days leading
 let highScore = 0;
 let frame     = 0;
@@ -322,14 +386,9 @@ function tap() {
   player.vy = JUMP_VEL;
   playJump();
 
-  // Tax cut flash — pick a fun variant
-  const variants = [
-    'TAX CUT! 💰',
-    'TRICKLE DOWN! 📉',
-    'TAX CUT! 🏦',
-    'LESS TAX! 💸',
-    'CUT RED TAPE! ✂️',
-  ];
+  // Mode-specific flash text
+  const M = MODES[gameMode];
+  const variants = M.tapTexts;
   taxFlashes.push({
     text:  variants[Math.floor(Math.random() * variants.length)],
     x:     GW / 2,
@@ -339,21 +398,51 @@ function tap() {
     vy:    -0.6,
   });
 
-  // Little burst particles
+  // Burst particles in mode colours
   for (let i = 0; i < 6; i++) {
     const angle = (Math.PI * 2 * i) / 6;
     particles.push({
       x: player.x, y: player.y,
       vx: Math.cos(angle) * (1.5 + Math.random()),
       vy: Math.sin(angle) * (1.5 + Math.random()),
-      life: 1, color: ['#FFD700','#003DA5','#FFFFFF'][i % 3],
+      life: 1, color: M.particleColors[i % 3],
     });
   }
 }
 
-canvas.addEventListener('touchstart', e => { e.preventDefault(); tap(); }, { passive: false });
-canvas.addEventListener('mousedown',  e => { e.preventDefault(); tap(); });
-document.addEventListener('keydown',  e => { if (e.code === 'Space' || e.code === 'ArrowUp') tap(); });
+function tapAt(clientX, clientY) {
+  if (state === 'select') {
+    // Determine which half was tapped
+    const rect  = canvas.getBoundingClientRect();
+    const ratio = canvas.width / rect.width;
+    const gx    = (clientX - rect.left) * ratio;
+    gameMode = gx < GW / 2 ? 'luxon' : 'hipkins';
+    reset();
+    state = 'start';
+    return;
+  }
+  if (state === 'dead') {
+    // Bottom zone → go back to character select
+    const rect  = canvas.getBoundingClientRect();
+    const gy    = (clientY - rect.top) * (canvas.height / rect.height);
+    if (gy > GH / 2 + 160) { state = 'select'; return; }
+    reset();
+    state = 'start';
+    return;
+  }
+  tap();
+}
+
+canvas.addEventListener('touchstart', e => { e.preventDefault(); tapAt(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
+canvas.addEventListener('mousedown',  e => { e.preventDefault(); tapAt(e.clientX, e.clientY); });
+document.addEventListener('keydown',  e => {
+  if (e.code === 'Space' || e.code === 'ArrowUp') {
+    if (state === 'select') { gameMode = 'luxon'; reset(); state = 'start'; } else tap();
+  }
+  if (e.code === 'ArrowRight' || e.code === 'KeyH') {
+    if (state === 'select') { gameMode = 'hipkins'; reset(); state = 'start'; }
+  }
+});
 
 // ── Collision helpers ─────────────────────────────────────────
 function circRect(cx, cy, cr, rx, ry, rw, rh) {
@@ -377,22 +466,15 @@ function update() {
   // ── Difficulty ramp (speed increases with days survived) ──
   const dynamicSpeed = Math.min(4.2, 2.1 + score * 0.06);
 
-  // ── Milestone: Majority Government ──
+  // ── Milestone: Majority ──
+  const M = MODES[gameMode];
   if (pollPct >= 50 && prevPollPct < 50 && !majorityShown) {
     majorityShown = true;
-    milestoneFlashes.push({
-      text: 'MAJORITY GOVERNMENT! 🎉',
-      x: GW / 2, y: GH * 0.38,
-      alpha: 1, scale: 0.3, vy: -0.3,
-    });
+    milestoneFlashes.push({ text: M.majorityText, x: GW/2, y: GH*0.38, alpha:1, scale:0.3, vy:-0.3 });
     playCelebration();
   }
   if (pollPct >= 57 && prevPollPct < 57) {
-    milestoneFlashes.push({
-      text: 'LANDSLIDE! 🎊',
-      x: GW / 2, y: GH * 0.32,
-      alpha: 1, scale: 0.3, vy: -0.3,
-    });
+    milestoneFlashes.push({ text: M.landslide, x: GW/2, y: GH*0.32, alpha:1, scale:0.3, vy:-0.3 });
     playCelebration();
   }
 
@@ -421,13 +503,8 @@ function update() {
     const minY = 110;
     const maxY = GH - GROUND_H - PIPE_GAP - 80;
     const gapY = minY + Math.random() * (maxY - minY);
-    const scandals = [
-      'CONSENT SCANDAL','COST OF LIVING','MEDIA CRITICISM',
-      'POLL DROP','HOUSING CRISIS','BENEFIT CUTS','SCHOOL LUNCH',
-      'HEALTH CUTS','MĀORI POLICY','WATER QUALITY','CRIME STATS',
-      'BROKEN PROMISE','INFLATION','INTEREST RATES','PRIVATISATION',
-    ];
-    const label = scandals[Math.floor(Math.random() * scandals.length)];
+    const labels = MODES[gameMode].pipeLabels;
+    const label  = labels[Math.floor(Math.random() * labels.length)];
     pipes.push({ x: GW + PIPE_W, gapY, scored: false, label });
     nextPipe = frame + PIPE_EVERY;
   }
@@ -453,7 +530,7 @@ function update() {
 
   // ── Opposition leaders ──
   if (frame >= nextLeader) {
-    const types = ['hipkins', 'swarbrick', 'waititi'];
+    const types = MODES[gameMode].leaders;
     const type  = types[Math.floor(Math.random() * types.length)];
     const y     = 90 + Math.random() * (GH - GROUND_H - 220);
     leaders.push({
@@ -581,8 +658,9 @@ function draw() {
 
   if (state === 'playing' || state === 'dead') drawHUD();
   if (state === 'playing' || state === 'dead') drawPollGauge();
-  if (state === 'start') drawStart();
-  if (state === 'dead')  drawGameOver();
+  if (state === 'select') drawSelect();
+  if (state === 'start')  drawStart();
+  if (state === 'dead')   drawGameOver();
 }
 
 // ── Clouds ────────────────────────────────────────────────────
@@ -773,67 +851,65 @@ function drawMilestoneFlashes() {
   }
 }
 
-// ── Ground (coalition zone) ───────────────────────────────────
+// ── Ground (opposition zone — mode aware) ─────────────────────
 function drawGround() {
-  const gy = GH - GROUND_H;
+  const gy   = GH - GROUND_H;
   const half = GW / 2;
+  const M    = MODES[gameMode];
+  const L    = M.groundLeft;
+  const R    = M.groundRight;
 
-  // ACT — yellow/gold
-  const actGrad = ctx.createLinearGradient(0, gy, 0, GH);
-  actGrad.addColorStop(0, '#F5C400');
-  actGrad.addColorStop(1, '#C9A000');
-  ctx.fillStyle = actGrad;
+  // Left half
+  const lgGrad = ctx.createLinearGradient(0, gy, 0, GH);
+  lgGrad.addColorStop(0, L.c1); lgGrad.addColorStop(1, L.c2);
+  ctx.fillStyle = lgGrad;
   ctx.fillRect(0, gy, half, GROUND_H);
 
-  // NZ First — black/charcoal
-  const nzfGrad = ctx.createLinearGradient(half, gy, half, GH);
-  nzfGrad.addColorStop(0, '#222222');
-  nzfGrad.addColorStop(1, '#111111');
-  ctx.fillStyle = nzfGrad;
+  // Right half
+  const rgGrad = ctx.createLinearGradient(half, gy, half, GH);
+  rgGrad.addColorStop(0, R.c1); rgGrad.addColorStop(1, R.c2);
+  ctx.fillStyle = rgGrad;
   ctx.fillRect(half, gy, half, GROUND_H);
 
-  // Top border
+  // Top border + divider
   ctx.fillStyle = '#1a1a1a';
   ctx.fillRect(0, gy, GW, 4);
-
-  // Divider
   ctx.strokeStyle = 'rgba(255,255,255,0.3)';
   ctx.lineWidth = 1.5;
   ctx.setLineDash([6, 4]);
   ctx.beginPath();
-  ctx.moveTo(half, gy);
-  ctx.lineTo(half, GH);
+  ctx.moveTo(half, gy); ctx.lineTo(half, GH);
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // ACT text
+  // Left text
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#1a1a1a';
-  ctx.font = 'bold 18px Arial';
-  ctx.fillText('ACT', half / 2, gy + 26);
+  ctx.fillStyle = L.tc;
+  ctx.font = 'bold 17px Arial';
+  ctx.fillText(L.title, half / 2, gy + 25);
   ctx.font = '10px Arial';
-  ctx.fillStyle = '#333';
-  ctx.fillText('David Seymour', half / 2, gy + 42);
+  ctx.fillStyle = L.tc === '#FFD700' ? '#aaa' : '#333';
+  ctx.fillText(L.sub1, half / 2, gy + 41);
   ctx.font = '9px Arial';
-  ctx.fillStyle = '#555';
-  ctx.fillText('✂️  Cut. Everything.', half / 2, gy + 58);
+  ctx.fillStyle = L.tc === '#FFD700' ? '#888' : '#555';
+  ctx.fillText(L.sub2, half / 2, gy + 57);
   ctx.font = '8px Arial';
-  ctx.fillStyle = '#777';
-  ctx.fillText('Regulatory Standards Bill ∞', half / 2, gy + 72);
+  ctx.fillStyle = L.tc === '#FFD700' ? '#666' : '#777';
+  ctx.fillText(L.sub3, half / 2, gy + 71);
 
-  // NZ First text
-  ctx.fillStyle = '#FFD700';
-  ctx.font = 'bold 14px Arial';
-  ctx.fillText('NZ FIRST', half + (GW - half) / 2, gy + 24);
+  // Right text
+  ctx.fillStyle = R.tc;
+  ctx.font = 'bold 17px Arial';
+  ctx.fillText(R.title, half + half / 2, gy + 25);
   ctx.font = '10px Arial';
-  ctx.fillStyle = '#aaa';
-  ctx.fillText('Winston Peters', half + (GW - half) / 2, gy + 40);
+  ctx.fillStyle = R.tc === '#FFD700' ? '#aaa' : '#333';
+  ctx.fillText(R.sub1, half + half / 2, gy + 41);
   ctx.font = '9px Arial';
-  ctx.fillStyle = '#888';
-  ctx.fillText('🎩  Back Again (seriously)', half + (GW - half) / 2, gy + 55);
+  ctx.fillStyle = R.tc === '#FFD700' ? '#888' : '#555';
+  ctx.fillText(R.sub2, half + half / 2, gy + 57);
   ctx.font = '8px Arial';
-  ctx.fillStyle = '#666';
-  ctx.fillText('Est. 1993, 1996, 2008…', half + (GW - half) / 2, gy + 70);
+  ctx.fillStyle = R.tc === '#FFD700' ? '#666' : '#777';
+  ctx.fillText(R.sub3, half + half / 2, gy + 71);
 }
 
 // ── Player ────────────────────────────────────────────────────
@@ -897,14 +973,14 @@ function drawPlayer() {
     ctx.restore();
   }
 
-  drawFace('luxon', player.x, displayY, PLAYER_R, displayRotation);
+  drawFace(MODES[gameMode].player, player.x, displayY, PLAYER_R, displayRotation);
 
   // PM badge
   ctx.save();
   ctx.translate(player.x + PLAYER_R - 7, displayY - PLAYER_R + 7);
   ctx.beginPath();
   ctx.arc(0, 0, 10, 0, Math.PI * 2);
-  ctx.fillStyle = '#003DA5';
+  ctx.fillStyle = MODES[gameMode].accentColor;
   ctx.fill();
   ctx.strokeStyle = '#FFD700';
   ctx.lineWidth = 1.5;
@@ -1038,7 +1114,7 @@ function drawPollAxis() {
   ctx.font = 'bold 8px Arial';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('NATIONAL POLL %', 0, 0);
+  ctx.fillText(MODES[gameMode].party.toUpperCase() + ' POLL %', 0, 0);
   ctx.restore();
 
   ctx.restore();
@@ -1075,14 +1151,144 @@ function drawHUD() {
   // (poll gauge handles all HUD display now)
 }
 
-// ── Start screen ──────────────────────────────────────────────
-function drawStart() {
-  // Panel
+// ── Character select ──────────────────────────────────────────
+function drawSelect() {
+  // Full overlay
+  ctx.fillStyle = 'rgba(5,5,25,0.92)';
+  ctx.fillRect(0, 0, GW, GH);
+
+  // Header
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 28px Arial';
+  ctx.fillText('CHOOSE YOUR', GW / 2, 78);
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 44px Arial';
+  ctx.fillText('CHRIS', GW / 2, 124);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.52)';
+  ctx.font = '11px Arial';
+  ctx.fillText('Two Chrises. One election. You decide.', GW / 2, 148);
+
+  // Panel metrics
+  const panelW = 162;
+  const panelH = 338;
+  const lx     = 8;
+  const rx     = GW - 8 - panelW;  // 220
+  const py     = 164;
+  const pulse  = 0.65 + 0.35 * Math.sin(Date.now() / 380);
+
+  // ── Left panel: Luxon / National ──────────────────────────
   ctx.save();
-  ctx.fillStyle = 'rgba(0, 35, 105, 0.88)';
-  rRect(GW / 2 - 158, GH / 2 - 220, 316, 420, 22);
+  const lgGrad = ctx.createLinearGradient(lx, py, lx, py + panelH);
+  lgGrad.addColorStop(0, '#002a80');
+  lgGrad.addColorStop(1, '#001a60');
+  ctx.fillStyle = lgGrad;
+  rRect(lx, py, panelW, panelH, 16);
   ctx.fill();
   ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 2.5;
+  rRect(lx, py, panelW, panelH, 16);
+  ctx.stroke();
+  ctx.restore();
+
+  drawFace('luxon', lx + panelW / 2, py + 68, 50);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 15px Arial';
+  ctx.fillText('CHRIS LUXON', lx + panelW / 2, py + 136);
+  ctx.fillStyle = '#FFD700';
+  ctx.font = '11px Arial';
+  ctx.fillText('National Party', lx + panelW / 2, py + 153);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.80)';
+  ctx.font = '10px Arial';
+  ['Tax cuts boost', 'your polls.', 'Dodge scandals &', 'the opposition!'].forEach((ln, i) => {
+    ctx.fillText(ln, lx + panelW / 2, py + 174 + i * 15);
+  });
+
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 11px Arial';
+  ctx.fillText('← TAP LEFT', lx + panelW / 2, py + panelH - 14);
+  ctx.restore();
+
+  // ── Right panel: Hipkins / Labour ─────────────────────────
+  ctx.save();
+  const rgGrad = ctx.createLinearGradient(rx, py, rx, py + panelH);
+  rgGrad.addColorStop(0, '#990000');
+  rgGrad.addColorStop(1, '#660000');
+  ctx.fillStyle = rgGrad;
+  rRect(rx, py, panelW, panelH, 16);
+  ctx.fill();
+  ctx.strokeStyle = '#FF8888';
+  ctx.lineWidth = 2.5;
+  rRect(rx, py, panelW, panelH, 16);
+  ctx.stroke();
+  ctx.restore();
+
+  drawFace('hipkins', rx + panelW / 2, py + 68, 50);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 15px Arial';
+  ctx.fillText('CHRIS HIPKINS', rx + panelW / 2, py + 136);
+  ctx.fillStyle = '#FF8888';
+  ctx.font = '11px Arial';
+  ctx.fillText('Labour Party', rx + panelW / 2, py + 153);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.80)';
+  ctx.font = '10px Arial';
+  ['Public spending', 'boosts your polls.', 'Dodge the right-wing', 'opposition!'].forEach((ln, i) => {
+    ctx.fillText(ln, rx + panelW / 2, py + 174 + i * 15);
+  });
+
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = '#FF8888';
+  ctx.font = 'bold 11px Arial';
+  ctx.fillText('TAP RIGHT →', rx + panelW / 2, py + panelH - 14);
+  ctx.restore();
+
+  // ── VS badge ──────────────────────────────────────────────
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.beginPath();
+  ctx.arc(GW / 2, py + panelH / 2, 26, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 18px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('VS', GW / 2, py + panelH / 2);
+  ctx.restore();
+
+  // Footer
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = 'rgba(255,255,255,0.28)';
+  ctx.font = '9px Arial';
+  ctx.fillText('Satire only — not affiliated with any party', GW / 2, GH - 100);
+}
+
+// ── Start screen ──────────────────────────────────────────────
+function drawStart() {
+  const M         = MODES[gameMode];
+  const lastName  = M.playerLabel.split(' ').pop().toUpperCase();
+  const panelFill = gameMode === 'luxon' ? 'rgba(0,35,105,0.88)' : 'rgba(130,0,0,0.88)';
+  const borderCol = gameMode === 'luxon' ? '#FFD700' : '#FF9999';
+
+  // Panel
+  ctx.save();
+  ctx.fillStyle = panelFill;
+  rRect(GW / 2 - 158, GH / 2 - 220, 316, 420, 22);
+  ctx.fill();
+  ctx.strokeStyle = borderCol;
   ctx.lineWidth = 2;
   rRect(GW / 2 - 158, GH / 2 - 220, 316, 420, 22);
   ctx.stroke();
@@ -1090,25 +1296,25 @@ function drawStart() {
 
   // Title
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#FFD700';
+  ctx.fillStyle = borderCol;
   ctx.font = 'bold 52px Arial';
   ctx.fillText('FLAPPY', GW / 2, GH / 2 - 148);
   ctx.fillStyle = 'white';
-  ctx.font = 'bold 48px Arial';
-  ctx.fillText('LUXON', GW / 2, GH / 2 - 100);
+  ctx.font = `bold ${lastName.length > 5 ? 40 : 48}px Arial`;
+  ctx.fillText(lastName, GW / 2, GH / 2 - 100);
 
   // Face
-  drawFace('luxon', GW / 2, GH / 2 - 28, 48);
+  drawFace(M.player, GW / 2, GH / 2 - 28, 48);
 
   // Tagline
-  ctx.fillStyle = '#FFD700';
+  ctx.fillStyle = borderCol;
   ctx.font = 'bold 13px Arial';
   ctx.fillText('Stay high in the polls!', GW / 2, GH / 2 + 44);
 
   ctx.fillStyle = 'rgba(255,255,255,0.78)';
   ctx.font = '11.5px Arial';
-  ctx.fillText('Tax cuts boost your poll numbers', GW / 2, GH / 2 + 63);
-  ctx.fillText("Dodge scandals & the opposition!", GW / 2, GH / 2 + 80);
+  ctx.fillText(M.startSub1, GW / 2, GH / 2 + 63);
+  ctx.fillText(M.startSub2, GW / 2, GH / 2 + 80);
 
   // Blinking tap prompt
   const pulse = 0.65 + 0.35 * Math.sin(Date.now() / 380);
@@ -1119,7 +1325,7 @@ function drawStart() {
   ctx.globalAlpha = 1;
 
   if (highScore > 0) {
-    ctx.fillStyle = '#FFD700';
+    ctx.fillStyle = borderCol;
     ctx.font = '13px Arial';
     ctx.fillText(`🏆 Best: ${highScore}`, GW / 2, GH / 2 + 160);
   }
@@ -1127,6 +1333,10 @@ function drawStart() {
 
 // ── Game over ─────────────────────────────────────────────────
 function drawGameOver() {
+  const M      = MODES[gameMode];
+  const panelC1 = gameMode === 'luxon' ? '#A80000' : '#003080';
+  const panelC2 = gameMode === 'luxon' ? '#CC0000' : '#004BB0';
+
   // Dim
   ctx.fillStyle = 'rgba(0,0,0,0.72)';
   ctx.fillRect(0, 0, GW, GH);
@@ -1134,15 +1344,15 @@ function drawGameOver() {
   // Panel
   ctx.save();
   const panelGrad = ctx.createLinearGradient(GW / 2 - 158, 0, GW / 2 + 158, 0);
-  panelGrad.addColorStop(0, '#A80000');
-  panelGrad.addColorStop(0.5, '#CC0000');
-  panelGrad.addColorStop(1, '#A80000');
+  panelGrad.addColorStop(0,   panelC1);
+  panelGrad.addColorStop(0.5, panelC2);
+  panelGrad.addColorStop(1,   panelC1);
   ctx.fillStyle = panelGrad;
-  rRect(GW / 2 - 158, GH / 2 - 228, 316, 440, 22);
+  rRect(GW / 2 - 158, GH / 2 - 228, 316, 460, 22);
   ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,0.25)';
   ctx.lineWidth = 1.5;
-  rRect(GW / 2 - 158, GH / 2 - 228, 316, 440, 22);
+  rRect(GW / 2 - 158, GH / 2 - 228, 316, 460, 22);
   ctx.stroke();
   ctx.restore();
 
@@ -1150,14 +1360,14 @@ function drawGameOver() {
   ctx.textAlign = 'center';
   ctx.fillStyle = 'white';
   ctx.font = 'bold 26px Arial';
-  ctx.fillText('NATIONAL DROPPED', GW / 2, GH / 2 - 177);
+  ctx.fillText(M.gameOver1, GW / 2, GH / 2 - 177);
   ctx.font = 'bold 24px Arial';
-  ctx.fillText('IN THE POLLS', GW / 2, GH / 2 - 148);
+  ctx.fillText(M.gameOver2, GW / 2, GH / 2 - 148);
 
   // Subhead
   ctx.fillStyle = '#FFD700';
   ctx.font = 'italic 15px Georgia';
-  ctx.fillText('Tax cuts: Ineffective', GW / 2, GH / 2 - 120);
+  ctx.fillText(M.gameOverSub, GW / 2, GH / 2 - 120);
 
   // Divider
   ctx.strokeStyle = 'rgba(255,255,255,0.25)';
@@ -1198,8 +1408,8 @@ function drawGameOver() {
   // Quote
   ctx.fillStyle = 'rgba(255,255,255,0.82)';
   ctx.font = 'italic 11.5px Georgia';
-  ctx.fillText('"He navigated the bureaucracy…', GW / 2, GH / 2 + 50);
-  ctx.fillText('straight into coalition talks."', GW / 2, GH / 2 + 65);
+  ctx.fillText(M.quote1, GW / 2, GH / 2 + 50);
+  ctx.fillText(M.quote2, GW / 2, GH / 2 + 65);
   ctx.fillStyle = 'rgba(255,255,255,0.5)';
   ctx.font = '10px Georgia';
   ctx.fillText('— NZ Herald, probably', GW / 2, GH / 2 + 82);
@@ -1214,7 +1424,19 @@ function drawGameOver() {
 
   ctx.fillStyle = 'rgba(255,255,255,0.38)';
   ctx.font = '10px Arial';
-  ctx.fillText('(The economy cannot be fixed in one term)', GW / 2, GH / 2 + 150);
+  ctx.fillText('(NZ politics is a marathon, not a sprint)', GW / 2, GH / 2 + 150);
+
+  // Change character hint (tap very bottom of panel)
+  ctx.fillStyle = 'rgba(255,255,255,0.42)';
+  ctx.font = '10px Arial';
+  ctx.fillText('↩  tap below here to change character', GW / 2, GH / 2 + 178);
+  // Separator line above hint
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(GW / 2 - 100, GH / 2 + 164);
+  ctx.lineTo(GW / 2 + 100, GH / 2 + 164);
+  ctx.stroke();
 }
 
 // ── Game loop ─────────────────────────────────────────────────
