@@ -500,12 +500,13 @@ function update() {
 
   // ── Pipes ──
   if (frame >= nextPipe) {
-    const minY = 110;
-    const maxY = GH - GROUND_H - PIPE_GAP - 80;
-    const gapY = minY + Math.random() * (maxY - minY);
+    const side   = Math.random() < 0.5 ? 'top' : 'bottom';
+    const minH   = 80;
+    const maxH   = GH - GROUND_H - 180;
+    const h      = minH + Math.random() * (maxH - minH);
     const labels = MODES[gameMode].pipeLabels;
     const label  = labels[Math.floor(Math.random() * labels.length)];
-    pipes.push({ x: GW + PIPE_W, gapY, scored: false, label });
+    pipes.push({ x: GW + PIPE_W, side, h, scored: false, label });
     nextPipe = frame + PIPE_EVERY;
   }
 
@@ -518,12 +519,14 @@ function update() {
       playScore();
     }
 
-    // Collision: top pipe
-    if (circRect(player.x, player.y, PLAYER_R - 3,
-                 p.x, 0, PIPE_W, p.gapY)) { die(); return; }
-    // Collision: bottom pipe
-    if (circRect(player.x, player.y, PLAYER_R - 3,
-                 p.x, p.gapY + PIPE_GAP, PIPE_W, GH)) { die(); return; }
+    // Collision: single-sided pipe
+    if (p.side === 'top') {
+      if (circRect(player.x, player.y, PLAYER_R - 3,
+                   p.x, 0, PIPE_W, p.h)) { die(); return; }
+    } else {
+      if (circRect(player.x, player.y, PLAYER_R - 3,
+                   p.x, GH - GROUND_H - p.h, PIPE_W, p.h)) { die(); return; }
+    }
 
     if (p.x + PIPE_W < 0) pipes.splice(i, 1);
   }
@@ -677,10 +680,11 @@ function drawClouds() {
 // ── Pipes (bureaucratic red tape) ─────────────────────────────
 function drawPipes() {
   for (const p of pipes) {
-    // Top pipe
-    drawBureauPipe(p.x, 0, PIPE_W, p.gapY, 'top', p.label);
-    // Bottom pipe
-    drawBureauPipe(p.x, p.gapY + PIPE_GAP, PIPE_W, GH - GROUND_H - (p.gapY + PIPE_GAP), 'bot', p.label);
+    if (p.side === 'top') {
+      drawBureauPipe(p.x, 0, PIPE_W, p.h, 'top', p.label);
+    } else {
+      drawBureauPipe(p.x, GH - GROUND_H - p.h, PIPE_W, p.h, 'bot', p.label);
+    }
   }
 }
 
