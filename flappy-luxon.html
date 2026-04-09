@@ -501,8 +501,8 @@ function update() {
   // ── Pipes ──
   if (frame >= nextPipe) {
     const side   = Math.random() < 0.5 ? 'top' : 'bottom';
-    const minH   = 80;
-    const maxH   = GH - GROUND_H - 180;
+    const minH   = 60;
+    const maxH   = 200;
     const h      = minH + Math.random() * (maxH - minH);
     const labels = MODES[gameMode].pipeLabels;
     const label  = labels[Math.floor(Math.random() * labels.length)];
